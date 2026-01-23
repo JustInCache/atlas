@@ -6,7 +6,7 @@
 ![Kubernetes](https://img.shields.io/badge/Kubernetes-0.28-326CE5?logo=kubernetes)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
-<img width="1393" height="935" alt="image" src="https://github.com/user-attachments/assets/12ba1c7b-5ad6-40c1-a0ba-247357e3e01a" />
+<img width="866" height="368" alt="image" src="https://github.com/user-attachments/assets/4fb13e29-9b20-4f6d-a5ba-e84c2e8541a2" />
 
 
 ## ✨ Features 
