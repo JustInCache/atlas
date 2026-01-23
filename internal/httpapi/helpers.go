@@ -2,15 +2,35 @@ package httpapi
 
 import (
 	"context"
+	"fmt"
+	"time"
 
 	"ajna/internal/app"
 
 	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 )
+
+func formatAge(d time.Duration) string {
+	days := int(d.Hours() / 24)
+	hours := int(d.Hours()) % 24
+	minutes := int(d.Minutes()) % 60
+
+	if days > 0 {
+		return fmt.Sprintf("%dd", days)
+	}
+	if hours > 0 {
+		return fmt.Sprintf("%dh", hours)
+	}
+	if minutes > 0 {
+		return fmt.Sprintf("%dm", minutes)
+	}
+	return fmt.Sprintf("%ds", int(d.Seconds()))
+}
 
 func calculatePodHealth(pod *corev1.Pod) int {
 	if pod.Status.Phase == "Running" {
@@ -249,11 +269,100 @@ func buildIngressDetails(ing *networkingv1.Ingress, application *app.App, ctx co
 func buildPodRelationships(pod *corev1.Pod, application *app.App, ctx context.Context) []map[string]interface{} {
 	relationships := []map[string]interface{}{}
 
+	// Owner references (Deployment, ReplicaSet, etc.)
 	for _, owner := range pod.OwnerReferences {
 		relationships = append(relationships, map[string]interface{}{
 			"relationship_type": "Owned By",
 			"resource_type":     owner.Kind,
 			"resource_name":     owner.Name,
+			"target_type":       owner.Kind,
+			"target_namespace":  pod.Namespace,
+			"icon":              "👤",
+		})
+	}
+
+	// PersistentVolumeClaims
+	for _, vol := range pod.Spec.Volumes {
+		if vol.PersistentVolumeClaim != nil {
+			relationships = append(relationships, map[string]interface{}{
+				"relationship_type": "Uses PVC",
+				"resource_type":     "PersistentVolumeClaim",
+				"resource_name":     vol.PersistentVolumeClaim.ClaimName,
+				"target_type":       "PersistentVolumeClaim",
+				"target_namespace":  pod.Namespace,
+				"mount_name":        vol.Name,
+				"icon":              "💾",
+			})
+		}
+	}
+
+	// ConfigMaps (from volumes)
+	for _, vol := range pod.Spec.Volumes {
+		if vol.ConfigMap != nil {
+			relationships = append(relationships, map[string]interface{}{
+				"relationship_type": "Mounts ConfigMap",
+				"resource_type":     "ConfigMap",
+				"resource_name":     vol.ConfigMap.Name,
+				"target_type":       "ConfigMap",
+				"target_namespace":  pod.Namespace,
+				"mount_name":        vol.Name,
+				"icon":              "⚙️",
+			})
+		}
+	}
+
+	// Secrets (from volumes)
+	for _, vol := range pod.Spec.Volumes {
+		if vol.Secret != nil {
+			relationships = append(relationships, map[string]interface{}{
+				"relationship_type": "Mounts Secret",
+				"resource_type":     "Secret",
+				"resource_name":     vol.Secret.SecretName,
+				"target_type":       "Secret",
+				"target_namespace":  pod.Namespace,
+				"mount_name":        vol.Name,
+				"icon":              "🔐",
+			})
+		}
+	}
+
+	// ConfigMaps and Secrets from envFrom
+	for _, container := range pod.Spec.Containers {
+		for _, envFrom := range container.EnvFrom {
+			if envFrom.ConfigMapRef != nil {
+				relationships = append(relationships, map[string]interface{}{
+					"relationship_type": "Uses ConfigMap (Env)",
+					"resource_type":     "ConfigMap",
+					"resource_name":     envFrom.ConfigMapRef.Name,
+					"target_type":       "ConfigMap",
+					"target_namespace":  pod.Namespace,
+					"container":         container.Name,
+					"icon":              "⚙️",
+				})
+			}
+			if envFrom.SecretRef != nil {
+				relationships = append(relationships, map[string]interface{}{
+					"relationship_type": "Uses Secret (Env)",
+					"resource_type":     "Secret",
+					"resource_name":     envFrom.SecretRef.Name,
+					"target_type":       "Secret",
+					"target_namespace":  pod.Namespace,
+					"container":         container.Name,
+					"icon":              "🔐",
+				})
+			}
+		}
+	}
+
+	// ServiceAccount
+	if pod.Spec.ServiceAccountName != "" && pod.Spec.ServiceAccountName != "default" {
+		relationships = append(relationships, map[string]interface{}{
+			"relationship_type": "Uses ServiceAccount",
+			"resource_type":     "ServiceAccount",
+			"resource_name":     pod.Spec.ServiceAccountName,
+			"target_type":       "ServiceAccount",
+			"target_namespace":  pod.Namespace,
+			"icon":              "🎫",
 		})
 	}
 
@@ -263,18 +372,57 @@ func buildPodRelationships(pod *corev1.Pod, application *app.App, ctx context.Co
 func buildDeploymentRelationships(dep *appsv1.Deployment, application *app.App, ctx context.Context) []map[string]interface{} {
 	relationships := []map[string]interface{}{}
 
+	// Pods managed by this deployment
 	pods, _ := application.K8sClient.Clientset.CoreV1().Pods(dep.Namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: metav1.FormatLabelSelector(dep.Spec.Selector),
 	})
 	for _, pod := range pods.Items {
 		relationships = append(relationships, map[string]interface{}{
-			"relationship_type": "Manages",
+			"relationship_type": "Manages Pod",
 			"resource_type":     "Pod",
 			"resource_name":     pod.Name,
+			"target_type":       "Pod",
+			"target_namespace":  dep.Namespace,
+			"icon":              "📦",
 			"details": map[string]interface{}{
 				"status": string(pod.Status.Phase),
+				"node":   pod.Spec.NodeName,
 			},
 		})
+	}
+
+	// ConfigMaps and Secrets used by the deployment template
+	for _, vol := range dep.Spec.Template.Spec.Volumes {
+		if vol.ConfigMap != nil {
+			relationships = append(relationships, map[string]interface{}{
+				"relationship_type": "Uses ConfigMap",
+				"resource_type":     "ConfigMap",
+				"resource_name":     vol.ConfigMap.Name,
+				"target_type":       "ConfigMap",
+				"target_namespace":  dep.Namespace,
+				"icon":              "⚙️",
+			})
+		}
+		if vol.Secret != nil {
+			relationships = append(relationships, map[string]interface{}{
+				"relationship_type": "Uses Secret",
+				"resource_type":     "Secret",
+				"resource_name":     vol.Secret.SecretName,
+				"target_type":       "Secret",
+				"target_namespace":  dep.Namespace,
+				"icon":              "🔐",
+			})
+		}
+		if vol.PersistentVolumeClaim != nil {
+			relationships = append(relationships, map[string]interface{}{
+				"relationship_type": "Uses PVC",
+				"resource_type":     "PersistentVolumeClaim",
+				"resource_name":     vol.PersistentVolumeClaim.ClaimName,
+				"target_type":       "PersistentVolumeClaim",
+				"target_namespace":  dep.Namespace,
+				"icon":              "💾",
+			})
+		}
 	}
 
 	return relationships
@@ -283,17 +431,67 @@ func buildDeploymentRelationships(dep *appsv1.Deployment, application *app.App, 
 func buildServiceRelationships(svc *corev1.Service, application *app.App, ctx context.Context) []map[string]interface{} {
 	relationships := []map[string]interface{}{}
 
+	// Deployments that this service routes to (top-down)
 	if svc.Spec.Selector != nil {
 		selector := labels.Set(svc.Spec.Selector).AsSelector()
-		pods, _ := application.K8sClient.Clientset.CoreV1().Pods(svc.Namespace).List(ctx, metav1.ListOptions{
-			LabelSelector: selector.String(),
-		})
-		for _, pod := range pods.Items {
-			relationships = append(relationships, map[string]interface{}{
-				"relationship_type": "Routes To",
-				"resource_type":     "Pod",
-				"resource_name":     pod.Name,
+
+		// Find deployments that match the service selector
+		deployments, _ := application.K8sClient.Clientset.AppsV1().Deployments(svc.Namespace).List(ctx, metav1.ListOptions{})
+		for _, dep := range deployments.Items {
+			if selector.Matches(labels.Set(dep.Spec.Template.Labels)) {
+				relationships = append(relationships, map[string]interface{}{
+					"relationship_type": "Routes To Deployment",
+					"resource_type":     "Deployment",
+					"resource_name":     dep.Name,
+					"target_type":       "Deployment",
+					"target_namespace":  svc.Namespace,
+					"icon":              "🏗️",
+					"details": map[string]interface{}{
+						"replicas": fmt.Sprintf("%d/%d", dep.Status.ReadyReplicas, *dep.Spec.Replicas),
+						"status":   fmt.Sprintf("%d available", dep.Status.AvailableReplicas),
+					},
+				})
+			}
+		}
+
+		// Find StatefulSets that match the service selector
+		statefulsets, _ := application.K8sClient.Clientset.AppsV1().StatefulSets(svc.Namespace).List(ctx, metav1.ListOptions{})
+		for _, sts := range statefulsets.Items {
+			if selector.Matches(labels.Set(sts.Spec.Template.Labels)) {
+				relationships = append(relationships, map[string]interface{}{
+					"relationship_type": "Routes To StatefulSet",
+					"resource_type":     "StatefulSet",
+					"resource_name":     sts.Name,
+					"target_type":       "StatefulSet",
+					"target_namespace":  svc.Namespace,
+					"icon":              "📊",
+					"details": map[string]interface{}{
+						"replicas": fmt.Sprintf("%d/%d", sts.Status.ReadyReplicas, *sts.Spec.Replicas),
+					},
+				})
+			}
+		}
+
+		// If no deployments/statefulsets found, show pods directly
+		if len(relationships) == 0 {
+			pods, _ := application.K8sClient.Clientset.CoreV1().Pods(svc.Namespace).List(ctx, metav1.ListOptions{
+				LabelSelector: selector.String(),
 			})
+			for _, pod := range pods.Items {
+				relationships = append(relationships, map[string]interface{}{
+					"relationship_type": "Routes To Pod",
+					"resource_type":     "Pod",
+					"resource_name":     pod.Name,
+					"target_type":       "Pod",
+					"target_namespace":  svc.Namespace,
+					"icon":              "📦",
+					"details": map[string]interface{}{
+						"status": string(pod.Status.Phase),
+						"pod_ip": pod.Status.PodIP,
+						"node":   pod.Spec.NodeName,
+					},
+				})
+			}
 		}
 	}
 
@@ -303,17 +501,483 @@ func buildServiceRelationships(svc *corev1.Service, application *app.App, ctx co
 func buildIngressRelationships(ing *networkingv1.Ingress, application *app.App, ctx context.Context) []map[string]interface{} {
 	relationships := []map[string]interface{}{}
 
+	// Use a map to deduplicate services and collect their paths
+	serviceMap := make(map[string][]map[string]string)
+
 	for _, rule := range ing.Spec.Rules {
 		if rule.HTTP != nil {
 			for _, path := range rule.HTTP.Paths {
+				if path.Backend.Service != nil {
+					serviceName := path.Backend.Service.Name
+					pathInfo := map[string]string{
+						"host": rule.Host,
+						"path": path.Path,
+					}
+					serviceMap[serviceName] = append(serviceMap[serviceName], pathInfo)
+				}
+			}
+		}
+	}
+
+	// Create one relationship per unique service with all its paths
+	for serviceName, paths := range serviceMap {
+		svc, _ := application.K8sClient.Clientset.CoreV1().Services(ing.Namespace).Get(ctx, serviceName, metav1.GetOptions{})
+
+		details := map[string]interface{}{
+			"paths": paths,
+		}
+		if svc != nil {
+			details["cluster_ip"] = svc.Spec.ClusterIP
+			details["service_type"] = string(svc.Spec.Type)
+		}
+
+		relationships = append(relationships, map[string]interface{}{
+			"relationship_type": "Routes To Service",
+			"resource_type":     "Service",
+			"resource_name":     serviceName,
+			"target_type":       "Service",
+			"target_namespace":  ing.Namespace,
+			"icon":              "🌐",
+			"details":           details,
+		})
+	}
+
+	return relationships
+}
+
+func buildStatefulSetDetails(sts *appsv1.StatefulSet, application *app.App, ctx context.Context) map[string]interface{} {
+	desired := int32(0)
+	if sts.Spec.Replicas != nil {
+		desired = *sts.Spec.Replicas
+	}
+
+	health := 100
+	if desired > 0 {
+		health = int((sts.Status.ReadyReplicas * 100) / desired)
+	}
+
+	return map[string]interface{}{
+		"name":          sts.Name,
+		"namespace":     sts.Namespace,
+		"resource_type": "StatefulSet",
+		"status":        getStatefulSetStatus(sts),
+		"health_score":  health,
+		"details": map[string]interface{}{
+			"replicas_desired": desired,
+			"replicas_ready":   sts.Status.ReadyReplicas,
+			"replicas_current": sts.Status.CurrentReplicas,
+			"service_name":     sts.Spec.ServiceName,
+			"update_strategy":  string(sts.Spec.UpdateStrategy.Type),
+		},
+		"relationships": buildStatefulSetRelationships(sts, application, ctx),
+	}
+}
+
+func buildDaemonSetDetails(ds *appsv1.DaemonSet, application *app.App, ctx context.Context) map[string]interface{} {
+	health := 100
+	if ds.Status.DesiredNumberScheduled > 0 {
+		health = int((ds.Status.NumberReady * 100) / ds.Status.DesiredNumberScheduled)
+	}
+
+	return map[string]interface{}{
+		"name":          ds.Name,
+		"namespace":     ds.Namespace,
+		"resource_type": "DaemonSet",
+		"status":        getDaemonSetStatus(ds),
+		"health_score":  health,
+		"details": map[string]interface{}{
+			"desired_scheduled": ds.Status.DesiredNumberScheduled,
+			"current_scheduled": ds.Status.CurrentNumberScheduled,
+			"ready":             ds.Status.NumberReady,
+			"available":         ds.Status.NumberAvailable,
+			"update_strategy":   string(ds.Spec.UpdateStrategy.Type),
+		},
+		"relationships": buildDaemonSetRelationships(ds, application, ctx),
+	}
+}
+
+func buildJobDetails(job *batchv1.Job, application *app.App, ctx context.Context) map[string]interface{} {
+	status := "Running"
+	health := 50
+	if job.Status.Succeeded > 0 {
+		status = "Completed"
+		health = 100
+	} else if job.Status.Failed > 0 {
+		status = "Failed"
+		health = 0
+	}
+
+	return map[string]interface{}{
+		"name":          job.Name,
+		"namespace":     job.Namespace,
+		"resource_type": "Job",
+		"status":        status,
+		"health_score":  health,
+		"details": map[string]interface{}{
+			"completions": job.Spec.Completions,
+			"parallelism": job.Spec.Parallelism,
+			"succeeded":   job.Status.Succeeded,
+			"failed":      job.Status.Failed,
+			"active":      job.Status.Active,
+		},
+		"relationships": buildJobRelationships(job, application, ctx),
+	}
+}
+
+func buildCronJobDetails(cj *batchv1.CronJob, application *app.App, ctx context.Context) map[string]interface{} {
+	status := "Active"
+	health := 100
+	if cj.Spec.Suspend != nil && *cj.Spec.Suspend {
+		status = "Suspended"
+		health = 50
+	}
+
+	return map[string]interface{}{
+		"name":          cj.Name,
+		"namespace":     cj.Namespace,
+		"resource_type": "CronJob",
+		"status":        status,
+		"health_score":  health,
+		"details": map[string]interface{}{
+			"schedule":           cj.Spec.Schedule,
+			"suspend":            cj.Spec.Suspend != nil && *cj.Spec.Suspend,
+			"last_schedule_time": cj.Status.LastScheduleTime,
+			"active_jobs":        len(cj.Status.Active),
+			"concurrency_policy": string(cj.Spec.ConcurrencyPolicy),
+		},
+		"relationships": buildCronJobRelationships(cj, application, ctx),
+	}
+}
+
+func getStatefulSetStatus(sts *appsv1.StatefulSet) string {
+	desired := int32(0)
+	if sts.Spec.Replicas != nil {
+		desired = *sts.Spec.Replicas
+	}
+	if sts.Status.ReadyReplicas == desired {
+		return "Healthy"
+	}
+	return "Degraded"
+}
+
+func getDaemonSetStatus(ds *appsv1.DaemonSet) string {
+	if ds.Status.NumberReady == ds.Status.DesiredNumberScheduled {
+		return "Healthy"
+	}
+	return "Degraded"
+}
+
+func buildStatefulSetRelationships(sts *appsv1.StatefulSet, application *app.App, ctx context.Context) []map[string]interface{} {
+	relationships := []map[string]interface{}{}
+
+	// Find pods managed by this StatefulSet
+	if sts.Spec.Selector != nil {
+		selector := labels.SelectorFromSet(sts.Spec.Selector.MatchLabels)
+		pods, _ := application.K8sClient.Clientset.CoreV1().Pods(sts.Namespace).List(ctx, metav1.ListOptions{
+			LabelSelector: selector.String(),
+		})
+
+		for _, pod := range pods.Items {
+			relationships = append(relationships, map[string]interface{}{
+				"relationship_type": "Manages Pod",
+				"resource_type":     "Pod",
+				"resource_name":     pod.Name,
+				"icon":              "💾",
+			})
+		}
+	}
+
+	return relationships
+}
+
+func buildDaemonSetRelationships(ds *appsv1.DaemonSet, application *app.App, ctx context.Context) []map[string]interface{} {
+	relationships := []map[string]interface{}{}
+
+	// Find pods managed by this DaemonSet
+	if ds.Spec.Selector != nil {
+		selector := labels.SelectorFromSet(ds.Spec.Selector.MatchLabels)
+		pods, _ := application.K8sClient.Clientset.CoreV1().Pods(ds.Namespace).List(ctx, metav1.ListOptions{
+			LabelSelector: selector.String(),
+		})
+
+		for _, pod := range pods.Items {
+			relationships = append(relationships, map[string]interface{}{
+				"relationship_type": "Manages Pod",
+				"resource_type":     "Pod",
+				"resource_name":     pod.Name,
+				"icon":              "💾",
+			})
+		}
+	}
+
+	return relationships
+}
+
+func buildJobRelationships(job *batchv1.Job, application *app.App, ctx context.Context) []map[string]interface{} {
+	relationships := []map[string]interface{}{}
+
+	// Find pods created by this Job
+	if job.Spec.Selector != nil {
+		selector := labels.SelectorFromSet(job.Spec.Selector.MatchLabels)
+		pods, _ := application.K8sClient.Clientset.CoreV1().Pods(job.Namespace).List(ctx, metav1.ListOptions{
+			LabelSelector: selector.String(),
+		})
+
+		for _, pod := range pods.Items {
+			relationships = append(relationships, map[string]interface{}{
+				"relationship_type": "Created Pod",
+				"resource_type":     "Pod",
+				"resource_name":     pod.Name,
+				"icon":              "💾",
+			})
+		}
+	}
+
+	return relationships
+}
+
+func buildCronJobRelationships(cj *batchv1.CronJob, application *app.App, ctx context.Context) []map[string]interface{} {
+	relationships := []map[string]interface{}{}
+
+	// Find active jobs created by this CronJob
+	for _, activeJob := range cj.Status.Active {
+		relationships = append(relationships, map[string]interface{}{
+			"relationship_type": "Manages Job",
+			"resource_type":     "Job",
+			"resource_name":     activeJob.Name,
+			"icon":              "⚙️",
+		})
+	}
+
+	return relationships
+}
+
+func buildConfigMapRelationships(cm *corev1.ConfigMap, application *app.App, ctx context.Context) []map[string]interface{} {
+	relationships := []map[string]interface{}{}
+
+	// Find pods that use this ConfigMap (bottom-up)
+	pods, _ := application.K8sClient.Clientset.CoreV1().Pods(cm.Namespace).List(ctx, metav1.ListOptions{})
+
+	for _, pod := range pods.Items {
+		usageType := ""
+
+		// Check volumes
+		for _, vol := range pod.Spec.Volumes {
+			if vol.ConfigMap != nil && vol.ConfigMap.Name == cm.Name {
+				usageType = "volume"
+				break
+			}
+		}
+
+		// Check envFrom
+		if usageType == "" {
+			for _, container := range pod.Spec.Containers {
+				for _, envFrom := range container.EnvFrom {
+					if envFrom.ConfigMapRef != nil && envFrom.ConfigMapRef.Name == cm.Name {
+						usageType = "env"
+						break
+					}
+				}
+				if usageType != "" {
+					break
+				}
+			}
+		}
+
+		if usageType != "" {
+			relationships = append(relationships, map[string]interface{}{
+				"relationship_type": "Used By Pod",
+				"resource_type":     "Pod",
+				"resource_name":     pod.Name,
+				"target_type":       "Pod",
+				"target_namespace":  cm.Namespace,
+				"icon":              "📦",
+				"details": map[string]interface{}{
+					"usage_type": usageType,
+					"status":     string(pod.Status.Phase),
+				},
+			})
+		}
+	}
+
+	return relationships
+}
+
+func buildSecretRelationships(secret *corev1.Secret, application *app.App, ctx context.Context) []map[string]interface{} {
+	relationships := []map[string]interface{}{}
+
+	// Skip service account tokens
+	if secret.Type == "kubernetes.io/service-account-token" {
+		return relationships
+	}
+
+	// Find pods that use this Secret (bottom-up)
+	pods, _ := application.K8sClient.Clientset.CoreV1().Pods(secret.Namespace).List(ctx, metav1.ListOptions{})
+
+	for _, pod := range pods.Items {
+		usageType := ""
+
+		// Check volumes
+		for _, vol := range pod.Spec.Volumes {
+			if vol.Secret != nil && vol.Secret.SecretName == secret.Name {
+				usageType = "volume"
+				break
+			}
+		}
+
+		// Check envFrom
+		if usageType == "" {
+			for _, container := range pod.Spec.Containers {
+				for _, envFrom := range container.EnvFrom {
+					if envFrom.SecretRef != nil && envFrom.SecretRef.Name == secret.Name {
+						usageType = "env"
+						break
+					}
+				}
+				if usageType != "" {
+					break
+				}
+			}
+		}
+
+		if usageType != "" {
+			relationships = append(relationships, map[string]interface{}{
+				"relationship_type": "Used By Pod",
+				"resource_type":     "Pod",
+				"resource_name":     pod.Name,
+				"target_type":       "Pod",
+				"target_namespace":  secret.Namespace,
+				"icon":              "📦",
+				"details": map[string]interface{}{
+					"usage_type": usageType,
+					"status":     string(pod.Status.Phase),
+				},
+			})
+		}
+	}
+
+	return relationships
+}
+
+func buildPVCRelationships(pvc *corev1.PersistentVolumeClaim, application *app.App, ctx context.Context) []map[string]interface{} {
+	relationships := []map[string]interface{}{}
+
+	// Find pods that use this PVC (bottom-up)
+	pods, _ := application.K8sClient.Clientset.CoreV1().Pods(pvc.Namespace).List(ctx, metav1.ListOptions{})
+
+	for _, pod := range pods.Items {
+		for _, vol := range pod.Spec.Volumes {
+			if vol.PersistentVolumeClaim != nil && vol.PersistentVolumeClaim.ClaimName == pvc.Name {
 				relationships = append(relationships, map[string]interface{}{
-					"relationship_type": "Routes To",
-					"resource_type":     "Service",
-					"resource_name":     path.Backend.Service.Name,
+					"relationship_type": "Used By Pod",
+					"resource_type":     "Pod",
+					"resource_name":     pod.Name,
+					"target_type":       "Pod",
+					"target_namespace":  pvc.Namespace,
+					"icon":              "📦",
+					"details": map[string]interface{}{
+						"volume_name": vol.Name,
+						"status":      string(pod.Status.Phase),
+						"node":        pod.Spec.NodeName,
+					},
 				})
+				break
 			}
 		}
 	}
 
 	return relationships
+}
+
+func buildConfigMapDetails(cm *corev1.ConfigMap, application *app.App, ctx context.Context) map[string]interface{} {
+	details := map[string]interface{}{
+		"keys":       len(cm.Data),
+		"data_keys":  getMapKeys(cm.Data),
+		"labels":     cm.Labels,
+		"created_at": cm.CreationTimestamp.Time,
+	}
+
+	return map[string]interface{}{
+		"name":          cm.Name,
+		"namespace":     cm.Namespace,
+		"resource_type": "ConfigMap",
+		"status":        "Active",
+		"health_score":  100,
+		"details":       details,
+		"relationships": buildConfigMapRelationships(cm, application, ctx),
+	}
+}
+
+func buildSecretDetails(secret *corev1.Secret, application *app.App, ctx context.Context) map[string]interface{} {
+	details := map[string]interface{}{
+		"type":       string(secret.Type),
+		"keys":       len(secret.Data),
+		"data_keys":  getMapKeys(secret.Data),
+		"labels":     secret.Labels,
+		"created_at": secret.CreationTimestamp.Time,
+	}
+
+	return map[string]interface{}{
+		"name":          secret.Name,
+		"namespace":     secret.Namespace,
+		"resource_type": "Secret",
+		"status":        "Active",
+		"health_score":  100,
+		"details":       details,
+		"relationships": buildSecretRelationships(secret, application, ctx),
+	}
+}
+
+func buildPVCDetails(pvc *corev1.PersistentVolumeClaim, application *app.App, ctx context.Context) map[string]interface{} {
+	storageSize := ""
+	if storage, ok := pvc.Status.Capacity["storage"]; ok {
+		storageSize = storage.String()
+	}
+
+	details := map[string]interface{}{
+		"status":        string(pvc.Status.Phase),
+		"volume_name":   pvc.Spec.VolumeName,
+		"storage_size":  storageSize,
+		"access_modes":  pvc.Spec.AccessModes,
+		"storage_class": getStringPointer(pvc.Spec.StorageClassName),
+		"labels":        pvc.Labels,
+		"created_at":    pvc.CreationTimestamp.Time,
+	}
+
+	healthScore := 100
+	if pvc.Status.Phase != "Bound" {
+		healthScore = 50
+	}
+
+	return map[string]interface{}{
+		"name":          pvc.Name,
+		"namespace":     pvc.Namespace,
+		"resource_type": "PersistentVolumeClaim",
+		"status":        string(pvc.Status.Phase),
+		"health_score":  healthScore,
+		"details":       details,
+		"relationships": buildPVCRelationships(pvc, application, ctx),
+	}
+}
+
+func getMapKeys(m interface{}) []string {
+	keys := []string{}
+	switch v := m.(type) {
+	case map[string]string:
+		for k := range v {
+			keys = append(keys, k)
+		}
+	case map[string][]byte:
+		for k := range v {
+			keys = append(keys, k)
+		}
+	}
+	return keys
+}
+
+func getStringPointer(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
