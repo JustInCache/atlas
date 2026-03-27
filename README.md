@@ -23,12 +23,11 @@
 
 ### Installation
 
-\`\`\`bash
+```bash
 git clone https://github.com/Fanatic-zer0/atlas.git
-cd atlas
-make build
+cd atlas && make build
 ./bin/atlas
-\`\`\`
+```
 
 Access dashboard at `http://localhost:8080`
 
