@@ -24,7 +24,7 @@
 ### Installation
 
 \`\`\`bash
-git clone https://github.com/yourusername/atlas.git
+git clone https://github.com/Fanatic-zer0/atlas.git
 cd atlas
 make build
 ./bin/atlas
