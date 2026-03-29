@@ -14,6 +14,9 @@
 - **Health Dashboard** - Real-time cluster health with node monitoring and events
 - **Modern UI** - Dark theme with collapsible sections and responsive design
 
+<img width="1724" height="862" alt="image" src="https://github.com/user-attachments/assets/ebece4ee-cda2-4bf0-b445-272560052854" />
+
+
 ## 🚀 Quick Start
 
 ### Prerequisites
