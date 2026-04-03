@@ -161,6 +161,14 @@ type HelmRelease struct {
 	Description  string `json:"description,omitempty"`
 }
 
+type DeploymentRevision struct {
+	Revision  int      `json:"revision"`
+	CreatedAt string   `json:"created_at"`
+	Images    []string `json:"images"`
+	Replicas  int32    `json:"replicas"`
+	Reason    string   `json:"reason,omitempty"`
+}
+
 // Resource Viewer Types
 type ResourceListResponse struct {
 	Resources []ResourceSummary `json:"resources"`
