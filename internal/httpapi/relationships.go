@@ -118,12 +118,19 @@ func buildServiceToPodMap(application *app.App, ctx context.Context, namespace s
 			}
 		}
 
-		// Get endpoints info
-		endpoints, _ := application.K8sClient.Clientset.CoreV1().Endpoints(namespace).Get(ctx, svc.Name, metav1.GetOptions{})
+		// Get endpoints info using EndpointSlices
 		endpointCount := 0
-		if endpoints != nil {
-			for _, subset := range endpoints.Subsets {
-				endpointCount += len(subset.Addresses)
+		labelSelector := fmt.Sprintf("kubernetes.io/service-name=%s", svc.Name)
+		endpointSlices, _ := application.K8sClient.Clientset.DiscoveryV1().EndpointSlices(namespace).List(ctx, metav1.ListOptions{
+			LabelSelector: labelSelector,
+		})
+		if endpointSlices != nil {
+			for _, slice := range endpointSlices.Items {
+				for _, endpoint := range slice.Endpoints {
+					if endpoint.Conditions.Ready != nil && *endpoint.Conditions.Ready {
+						endpointCount++
+					}
+				}
 			}
 		}
 
@@ -464,12 +471,21 @@ func findOrphanedResources(application *app.App, ctx context.Context, namespace 
 			continue
 		}
 
-		endpoints, _ := application.K8sClient.Clientset.CoreV1().Endpoints(namespace).Get(ctx, svc.Name, metav1.GetOptions{})
+		// Use EndpointSlices to check for endpoints
+		labelSelector := fmt.Sprintf("kubernetes.io/service-name=%s", svc.Name)
+		endpointSlices, _ := application.K8sClient.Clientset.DiscoveryV1().EndpointSlices(namespace).List(ctx, metav1.ListOptions{
+			LabelSelector: labelSelector,
+		})
 		hasEndpoints := false
-		if endpoints != nil {
-			for _, subset := range endpoints.Subsets {
-				if len(subset.Addresses) > 0 {
-					hasEndpoints = true
+		if endpointSlices != nil {
+			for _, slice := range endpointSlices.Items {
+				for _, endpoint := range slice.Endpoints {
+					if endpoint.Conditions.Ready != nil && *endpoint.Conditions.Ready && len(endpoint.Addresses) > 0 {
+						hasEndpoints = true
+						break
+					}
+				}
+				if hasEndpoints {
 					break
 				}
 			}
