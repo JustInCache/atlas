@@ -12,10 +12,13 @@ RUN apk add --no-cache ca-certificates
 
 # Copy go mod files first for better caching
 COPY go.mod go.sum ./
-RUN go mod download
+RUN go mod download && go mod verify
 
 # Copy source code
 COPY . .
+
+# Ensure module is properly configured
+RUN go mod tidy
 
 # Build the binary — cross-compile for the target platform
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
@@ -35,8 +38,8 @@ COPY --from=builder /app/bin/atlas /app/atlas
 # Copy UI static files
 COPY --from=builder /app/ui /app/ui
 
-# Create non-root user
-RUN adduser -D -u 1000 appuser
+# Create non-root user and pre-create .kube dir with correct ownership
+RUN adduser -D -u 1000 appuser && mkdir -p /home/appuser/.kube
 USER appuser
 
 # Expose port
