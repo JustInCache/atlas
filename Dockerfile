@@ -1,5 +1,5 @@
 # Build stage — always runs on the host's native arch for speed
-FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.23-alpine AS builder
 
 # Populated automatically by buildx
 ARG TARGETOS
