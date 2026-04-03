@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -409,6 +410,13 @@ func getResourceDetails(application *app.App) http.HandlerFunc {
 		namespace := resolveNamespace(vars["namespace"])
 		name := vars["name"]
 
+		// Cache key for resource details (15 second TTL - details change less frequently than lists)
+		cacheKey := fmt.Sprintf("resource-details:%s:%s:%s", resourceType, namespace, name)
+		if cached, ok := application.Cache.Get(cacheKey); ok {
+			json.NewEncoder(w).Encode(cached)
+			return
+		}
+
 		ctx := r.Context()
 		var details map[string]interface{}
 
@@ -490,10 +498,41 @@ func getResourceDetails(application *app.App) http.HandlerFunc {
 				return
 			}
 			details = buildPVCDetails(pvc, application, ctx)
+		case "Endpoints":
+			ep, err := application.K8sClient.Clientset.CoreV1().Endpoints(namespace).Get(ctx, name, metav1.GetOptions{})
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusNotFound)
+				return
+			}
+			details = buildEndpointsDetails(ep, application, ctx)
+		case "StorageClass":
+			sc, err := application.K8sClient.Clientset.StorageV1().StorageClasses().Get(ctx, name, metav1.GetOptions{})
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusNotFound)
+				return
+			}
+			details = buildStorageClassDetails(sc, application, ctx)
+		case "HorizontalPodAutoscaler":
+			hpa, err := application.K8sClient.Clientset.AutoscalingV2().HorizontalPodAutoscalers(namespace).Get(ctx, name, metav1.GetOptions{})
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusNotFound)
+				return
+			}
+			details = buildHPADetails(hpa, application, ctx)
+		case "PodDisruptionBudget":
+			pdb, err := application.K8sClient.Clientset.PolicyV1().PodDisruptionBudgets(namespace).Get(ctx, name, metav1.GetOptions{})
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusNotFound)
+				return
+			}
+			details = buildPDBDetails(pdb, application, ctx)
 		default:
 			http.Error(w, "Unsupported resource type", http.StatusBadRequest)
 			return
 		}
+
+		// Cache the result (15 second TTL)
+		application.Cache.Set(cacheKey, details, 15*time.Second)
 
 		json.NewEncoder(w).Encode(details)
 	}
@@ -504,6 +543,13 @@ func getIngresses(application *app.App) http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 		vars := mux.Vars(r)
 		namespace := resolveNamespace(vars["namespace"])
+
+		// Check cache first
+		cacheKey := fmt.Sprintf("ingresses:%s", namespace)
+		if cached, ok := application.Cache.Get(cacheKey); ok {
+			json.NewEncoder(w).Encode(cached)
+			return
+		}
 
 		ingresses, err := application.K8sClient.Clientset.NetworkingV1().Ingresses(namespace).List(r.Context(), metav1.ListOptions{})
 		if err != nil {
@@ -595,6 +641,9 @@ func getIngresses(application *app.App) http.HandlerFunc {
 			})
 		}
 
+		// Cache for 30 seconds
+		application.Cache.Set(cacheKey, result, 30*time.Second)
+
 		json.NewEncoder(w).Encode(result)
 	}
 }
@@ -605,38 +654,110 @@ func getServices(application *app.App) http.HandlerFunc {
 		vars := mux.Vars(r)
 		namespace := resolveNamespace(vars["namespace"])
 
-		// Check cache first
-		cacheKey := fmt.Sprintf("services:%s", namespace)
+		// Parse pagination parameters
+		limitStr := r.URL.Query().Get("limit")
+		continueToken := r.URL.Query().Get("continue")
+
+		var limit int64 = 0 // 0 means no limit (fetch all)
+		if limitStr != "" {
+			if parsedLimit, err := strconv.ParseInt(limitStr, 10, 64); err == nil {
+				limit = parsedLimit
+			}
+		}
+
+		// Build cache key including pagination params
+		cacheKey := fmt.Sprintf("services:%s:limit=%d:continue=%s", namespace, limit, continueToken)
 		ctx := r.Context()
 
-		// Use helper function for ResourceVersion check
-		if serveFromCacheIfUnchanged(w, ctx, application, cacheKey, "services", namespace) {
-			return
+		// Only use cache for non-paginated requests
+		if limit == 0 && continueToken == "" {
+			cacheKey = fmt.Sprintf("services:%s", namespace)
+			// Use helper function for ResourceVersion check
+			if serveFromCacheIfUnchanged(w, ctx, application, cacheKey, "services", namespace) {
+				return
+			}
+
+			// Fallback to regular cache check
+			if cached, ok := application.Cache.Get(cacheKey); ok {
+				json.NewEncoder(w).Encode(cached)
+				return
+			}
 		}
 
-		// Fallback to regular cache check
-		if cached, ok := application.Cache.Get(cacheKey); ok {
-			json.NewEncoder(w).Encode(cached)
-			return
+		// Set up list options with pagination
+		listOpts := metav1.ListOptions{
+			Limit:    limit,
+			Continue: continueToken,
 		}
 
-		// Use optimized batch endpoint lookup from k8s package
-		services, err := k8s.ListServices(r.Context(), application.K8sClient.Clientset, namespace)
+		// Fetch services with pagination
+		servicesList, err := application.K8sClient.Clientset.CoreV1().Services(namespace).List(r.Context(), listOpts)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
-		// Get ResourceVersion for cache
-		currentVersion := ""
-		if svcList, err := application.K8sClient.Clientset.CoreV1().Services(namespace).List(r.Context(), metav1.ListOptions{Limit: 1}); err == nil {
-			currentVersion = svcList.ResourceVersion
+		// Batch fetch all EndpointSlices once to avoid N+1 queries
+		allEndpointSlices, _ := application.K8sClient.Clientset.DiscoveryV1().EndpointSlices(namespace).List(ctx, metav1.ListOptions{})
+		endpointCountMap := make(map[string]int)
+		if allEndpointSlices != nil {
+			for _, slice := range allEndpointSlices.Items {
+				serviceName := slice.Labels["kubernetes.io/service-name"]
+				if serviceName == "" {
+					continue
+				}
+				for _, endpoint := range slice.Endpoints {
+					if endpoint.Conditions.Ready != nil && *endpoint.Conditions.Ready {
+						endpointCountMap[serviceName]++
+					}
+				}
+			}
 		}
 
-		// Cache for 30 seconds with version
-		application.Cache.SetWithVersion(cacheKey, services, currentVersion, 30*time.Second)
+		// Convert to our format
+		services := []map[string]interface{}{}
+		for _, svc := range servicesList.Items {
+			ports := []map[string]interface{}{}
+			for _, port := range svc.Spec.Ports {
+				ports = append(ports, map[string]interface{}{
+					"name":        port.Name,
+					"port":        port.Port,
+					"target_port": port.TargetPort.String(),
+					"protocol":    string(port.Protocol),
+					"node_port":   port.NodePort,
+				})
+			}
 
-		json.NewEncoder(w).Encode(services)
+			// Get endpoint count from pre-fetched map
+			endpointCount := endpointCountMap[svc.Name]
+
+			services = append(services, map[string]interface{}{
+				"name":           svc.Name,
+				"namespace":      svc.Namespace,
+				"type":           string(svc.Spec.Type),
+				"cluster_ip":     svc.Spec.ClusterIP,
+				"ports":          ports,
+				"selector":       svc.Spec.Selector,
+				"endpoint_count": endpointCount,
+			})
+		}
+
+		// Build response with pagination metadata
+		response := map[string]interface{}{
+			"items":            services,
+			"count":            len(services),
+			"continue":         servicesList.Continue,
+			"has_more":         servicesList.Continue != "",
+			"limit":            limit,
+			"resource_version": servicesList.ResourceVersion,
+		}
+
+		// Get ResourceVersion for cache (only for non-paginated)
+		if limit == 0 && continueToken == "" {
+			application.Cache.SetWithVersion(cacheKey, response, servicesList.ResourceVersion, 30*time.Second)
+		}
+
+		json.NewEncoder(w).Encode(response)
 	}
 }
 
@@ -646,14 +767,35 @@ func getPods(application *app.App) http.HandlerFunc {
 		vars := mux.Vars(r)
 		namespace := resolveNamespace(vars["namespace"])
 
-		// Check cache first
-		cacheKey := fmt.Sprintf("pods:%s", namespace)
-		if cached, ok := application.Cache.Get(cacheKey); ok {
-			json.NewEncoder(w).Encode(cached)
-			return
+		// Parse pagination parameters
+		limitStr := r.URL.Query().Get("limit")
+		continueToken := r.URL.Query().Get("continue")
+
+		var limit int64 = 0 // 0 means no limit (fetch all)
+		if limitStr != "" {
+			if parsedLimit, err := strconv.ParseInt(limitStr, 10, 64); err == nil {
+				limit = parsedLimit
+			}
 		}
 
-		pods, err := application.K8sClient.Clientset.CoreV1().Pods(namespace).List(r.Context(), metav1.ListOptions{})
+		// Build cache key including pagination params
+		cacheKey := fmt.Sprintf("pods:%s:limit=%d:continue=%s", namespace, limit, continueToken)
+
+		// Only use cache for non-paginated requests to avoid complexity
+		if limit == 0 && continueToken == "" {
+			if cached, ok := application.Cache.Get(cacheKey); ok {
+				json.NewEncoder(w).Encode(cached)
+				return
+			}
+		}
+
+		// Set up list options with pagination
+		listOpts := metav1.ListOptions{
+			Limit:    limit,
+			Continue: continueToken,
+		}
+
+		pods, err := application.K8sClient.Clientset.CoreV1().Pods(namespace).List(r.Context(), listOpts)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -695,10 +837,22 @@ func getPods(application *app.App) http.HandlerFunc {
 			})
 		}
 
-		// Cache for 15 seconds
-		application.Cache.Set(cacheKey, result, 15*time.Second)
+		// Build response with pagination metadata
+		response := map[string]interface{}{
+			"items":            result,
+			"count":            len(result),
+			"continue":         pods.Continue,
+			"has_more":         pods.Continue != "",
+			"limit":            limit,
+			"resource_version": pods.ResourceVersion,
+		}
 
-		json.NewEncoder(w).Encode(result)
+		// Cache for 15 seconds (only non-paginated requests)
+		if limit == 0 && continueToken == "" {
+			application.Cache.Set(cacheKey, response, 15*time.Second)
+		}
+
+		json.NewEncoder(w).Encode(response)
 	}
 }
 
@@ -708,14 +862,36 @@ func getDeployments(application *app.App) http.HandlerFunc {
 		vars := mux.Vars(r)
 		namespace := resolveNamespace(vars["namespace"])
 
-		// Check cache first
-		cacheKey := fmt.Sprintf("deployments:%s", namespace)
-		if cached, ok := application.Cache.Get(cacheKey); ok {
-			json.NewEncoder(w).Encode(cached)
-			return
+		// Parse pagination parameters
+		limitStr := r.URL.Query().Get("limit")
+		continueToken := r.URL.Query().Get("continue")
+
+		var limit int64 = 0 // 0 means no limit (fetch all)
+		if limitStr != "" {
+			if parsedLimit, err := strconv.ParseInt(limitStr, 10, 64); err == nil {
+				limit = parsedLimit
+			}
 		}
 
-		deployments, err := application.K8sClient.Clientset.AppsV1().Deployments(namespace).List(r.Context(), metav1.ListOptions{})
+		// Build cache key including pagination params
+		cacheKey := fmt.Sprintf("deployments:%s:limit=%d:continue=%s", namespace, limit, continueToken)
+
+		// Only use cache for non-paginated requests to avoid complexity
+		if limit == 0 && continueToken == "" {
+			cacheKey = fmt.Sprintf("deployments:%s", namespace)
+			if cached, ok := application.Cache.Get(cacheKey); ok {
+				json.NewEncoder(w).Encode(cached)
+				return
+			}
+		}
+
+		// Set up list options with pagination
+		listOpts := metav1.ListOptions{
+			Limit:    limit,
+			Continue: continueToken,
+		}
+
+		deployments, err := application.K8sClient.Clientset.AppsV1().Deployments(namespace).List(r.Context(), listOpts)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -772,15 +948,28 @@ func getDeployments(application *app.App) http.HandlerFunc {
 				"available_replicas": dep.Status.AvailableReplicas,
 				"images":             images,
 				"resources":          resources,
+				"pod_labels":         dep.Spec.Template.Labels,
 				"health_score":       calculateDeploymentHealth(&dep),
 				"status_emoji":       getDeploymentStatusEmoji(&dep),
 			})
 		}
 
-		// Cache for 30 seconds
-		application.Cache.Set(cacheKey, result, 30*time.Second)
+		// Build response with pagination metadata
+		response := map[string]interface{}{
+			"items":            result,
+			"count":            len(result),
+			"continue":         deployments.Continue,
+			"has_more":         deployments.Continue != "",
+			"limit":            limit,
+			"resource_version": deployments.ResourceVersion,
+		}
 
-		json.NewEncoder(w).Encode(result)
+		// Cache for 30 seconds (only non-paginated requests)
+		if limit == 0 && continueToken == "" {
+			application.Cache.Set(cacheKey, response, 30*time.Second)
+		}
+
+		json.NewEncoder(w).Encode(response)
 	}
 }
 
@@ -923,24 +1112,30 @@ func getHealth(application *app.App) http.HandlerFunc {
 			}
 		}()
 
-		// Fetch services with endpoints (batch fetch endpoints for performance)
+		// Fetch services with endpoints (batch fetch endpoints using EndpointSlices)
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			services, err := application.K8sClient.Clientset.CoreV1().Services(namespace).List(ctx, metav1.ListOptions{})
 			if err == nil {
-				// Batch fetch all endpoints at once
-				endpointsList, _ := application.K8sClient.Clientset.CoreV1().Endpoints(namespace).List(ctx, metav1.ListOptions{})
+				// Batch fetch all EndpointSlices at once
+				endpointSlicesList, _ := application.K8sClient.Clientset.DiscoveryV1().EndpointSlices(namespace).List(ctx, metav1.ListOptions{})
 				endpointsMap := make(map[string]bool)
-				for _, ep := range endpointsList.Items {
-					hasAddresses := false
-					for _, subset := range ep.Subsets {
-						if len(subset.Addresses) > 0 {
-							hasAddresses = true
+				for _, slice := range endpointSlicesList.Items {
+					serviceName := slice.Labels["kubernetes.io/service-name"]
+					if serviceName == "" {
+						continue
+					}
+					hasReady := false
+					for _, endpoint := range slice.Endpoints {
+						if endpoint.Conditions.Ready != nil && *endpoint.Conditions.Ready && len(endpoint.Addresses) > 0 {
+							hasReady = true
 							break
 						}
 					}
-					endpointsMap[ep.Name] = hasAddresses
+					if hasReady {
+						endpointsMap[serviceName] = true
+					}
 				}
 
 				localWithEndpoints := 0
@@ -1186,13 +1381,54 @@ func getReleases(application *app.App) http.HandlerFunc {
 		vars := mux.Vars(r)
 		namespace := resolveNamespace(vars["namespace"])
 
+		// Check cache first (30 second TTL for releases)
+		cacheKey := fmt.Sprintf("releases:%s", namespace)
+		if cached, ok := application.Cache.Get(cacheKey); ok {
+			json.NewEncoder(w).Encode(cached)
+			return
+		}
+
+		// Fetch from K8s API
 		releases, err := k8s.GetReleases(r.Context(), application.K8sClient.Clientset, namespace)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
+		// Cache the result
+		application.Cache.Set(cacheKey, releases, 30*time.Second)
+
 		json.NewEncoder(w).Encode(releases)
+	}
+}
+
+func getDeploymentHistory(application *app.App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		vars := mux.Vars(r)
+		namespace := vars["namespace"]
+		deploymentName := vars["deployment"]
+
+		// Cache key for deployment history
+		cacheKey := fmt.Sprintf("deployment-history:%s:%s", namespace, deploymentName)
+
+		// Check cache first (30 second TTL - revisions don't change often)
+		if cached, ok := application.Cache.Get(cacheKey); ok {
+			json.NewEncoder(w).Encode(cached)
+			return
+		}
+
+		// Fetch from K8s API
+		history, err := k8s.GetDeploymentHistory(r.Context(), application.K8sClient.Clientset, namespace, deploymentName)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		// Cache the result
+		application.Cache.Set(cacheKey, history, 30*time.Second)
+
+		json.NewEncoder(w).Encode(history)
 	}
 }
 
