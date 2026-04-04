@@ -39,17 +39,46 @@ func getClusterInfo(application *app.App) http.HandlerFunc {
 			nsList = append(nsList, ns.Name)
 		}
 
-		config, err := clientcmd.NewDefaultClientConfigLoadingRules().Load()
-		if err != nil {
-			application.Logger.Warn("Failed to load kubeconfig", "error", err)
+		// Get cluster name
+		clusterName := ""
+		currentContext := ""
+
+		// First, check if we're in multi-cluster mode
+		if application.ClusterManager != nil {
+			userID := getUserID(r)
+			clusterID, ok := application.ClusterManager.GetUserCluster(userID)
+			if !ok {
+				clusterID = application.ClusterManager.GetDefaultCluster()
+			}
+
+			// Get cluster info from manager
+			clusters := application.ClusterManager.ListClusters()
+			for _, cluster := range clusters {
+				if cluster.ID == clusterID {
+					clusterName = cluster.Name
+					currentContext = clusterID
+					break
+				}
+			}
 		}
 
-		currentContext := ""
-		clusterName := ""
-		if config != nil {
-			currentContext = config.CurrentContext
-			if ctx, ok := config.Contexts[currentContext]; ok {
-				clusterName = ctx.Cluster
+		// Fallback: try to load from kubeconfig if not in multi-cluster mode
+		if clusterName == "" {
+			config, err := clientcmd.NewDefaultClientConfigLoadingRules().Load()
+			if err != nil {
+				application.Logger.Warn("Failed to load kubeconfig", "error", err)
+			}
+
+			if config != nil {
+				currentContext = config.CurrentContext
+				if ctx, ok := config.Contexts[currentContext]; ok {
+					clusterName = ctx.Cluster
+				}
+			}
+
+			// Final fallback: use a default name
+			if clusterName == "" {
+				clusterName = "kubernetes"
 			}
 		}
 

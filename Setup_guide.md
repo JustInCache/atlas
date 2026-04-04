@@ -660,3 +660,432 @@ features:
 3. **Secure Redis:** Use password authentication in production
 4. **Use TLS:** Deploy behind reverse proxy with TLS termination
 5. **Network policies:** Restrict access to Redis and Kubernetes API
+
+
+
+
+# Production Setup Guide - AWS EKS Clusters
+
+This guide walks you through deploying Atlas for production use with multiple AWS EKS clusters.
+
+---
+
+## 📋 Prerequisites
+
+1. **AWS CLI** installed and configured
+2. **kubectl** installed
+3. **Docker** and **Docker Compose** installed
+4. **AWS IAM permissions** to access EKS clusters
+5. Multiple **EKS clusters** already deployed
+
+---
+
+## 🔐 Step 1: Generate EKS Kubeconfig Files
+
+For each EKS cluster, generate a kubeconfig file:
+
+```bash
+# Create kubeconfigs directory
+mkdir -p kubeconfigs
+
+# Generate kubeconfig for each cluster
+aws eks update-kubeconfig \
+  --name prod-us-east-1 \
+  --region us-east-1 \
+  --kubeconfig kubeconfigs/eks-prod-us-east-1.yaml
+
+aws eks update-kubeconfig \
+  --name prod-us-west-2 \
+  --region us-west-2 \
+  --kubeconfig kubeconfigs/eks-prod-us-west-2.yaml
+
+aws eks update-kubeconfig \
+  --name prod-eu-west-1 \
+  --region eu-west-1 \
+  --kubeconfig kubeconfigs/eks-prod-eu-west-1.yaml
+
+aws eks update-kubeconfig \
+  --name staging-us-east-1 \
+  --region us-east-1 \
+  --kubeconfig kubeconfigs/eks-staging-us-east-1.yaml
+```
+
+**Verify the generated files:**
+```bash
+ls -lh kubeconfigs/
+cat kubeconfigs/eks-prod-us-east-1.yaml
+```
+
+---
+
+## 📝 Step 2: Configure Atlas
+
+### 2.1 Copy Production Configuration
+
+```bash
+# Copy production templates
+cp config.yaml.production config.yaml
+cp .env.production .env
+```
+
+### 2.2 Update config.yaml
+
+Edit `config.yaml` and replace the placeholder EKS API server URLs:
+
+```yaml
+clusters:
+  - id: prod-us-east-1
+    name: "Production US East 1"
+    kubeconfig: /app/kubeconfigs/eks-prod-us-east-1.yaml
+    api_server: https://ABCD1234.gr7.us-east-1.eks.amazonaws.com  # ← Replace this
+    region: us-east-1
+```
+
+**To find your EKS API server URLs:**
+```bash
+aws eks describe-cluster --name prod-us-east-1 --region us-east-1 --query "cluster.endpoint" --output text
+```
+
+### 2.3 Update .env
+
+Edit `.env` and set secure values:
+
+```bash
+# Required
+REDIS_PASSWORD=your-strong-random-password-here
+
+# Optional (defaults are fine)
+AWS_REGION=us-east-1
+LOG_LEVEL=info
+```
+
+**Generate a secure Redis password:**
+```bash
+openssl rand -base64 32
+```
+
+---
+
+## 🔑 Step 3: AWS Credentials Setup
+
+### Option A: Using IAM Roles (Recommended for EKS/EC2)
+
+If running Atlas on an EC2 instance or EKS pod, use IAM roles:
+
+1. **Create IAM policy** with EKS read permissions:
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "eks:DescribeCluster",
+        "eks:ListClusters"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+2. **Attach policy** to your EC2 instance role or EKS service account
+
+3. **No additional configuration needed** - AWS SDK will use the role automatically
+
+### Option B: Using AWS Credentials (For Docker on Non-AWS Hosts)
+
+If running on a non-AWS machine, mount your AWS credentials:
+
+**Uncomment in `docker-compose.production.yml`:**
+```yaml
+volumes:
+  - ~/.aws:/home/appuser/.aws:ro
+```
+
+**Or set environment variables in `.env`:**
+```bash
+AWS_ACCESS_KEY_ID=AKIAXXXXXXXXXXXXXXXX
+AWS_SECRET_ACCESS_KEY=your-secret-access-key
+```
+
+⚠️ **Security Warning**: Never commit AWS credentials to version control!
+
+---
+
+## 🚀 Step 4: Deploy Atlas
+
+### 4.1 Build and Start Services
+
+```bash
+# Set version and build metadata
+export VERSION=1.0.0
+export BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+export VCS_REF=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+
+# Build and start
+docker-compose -f docker-compose.production.yml up -d --build
+```
+
+### 4.2 Verify Deployment
+
+```bash
+# Check container status
+docker-compose -f docker-compose.production.yml ps
+
+# Check logs
+docker-compose -f docker-compose.production.yml logs -f atlas
+
+# Expected output:
+# ✅ Redis cache initialized successfully
+# ✅ Cluster added successfully id=prod-us-east-1
+# ✅ Starting HTTP server port=8080
+```
+
+### 4.3 Test API
+
+```bash
+# Health check
+curl http://localhost:8080/api/health
+
+# List clusters
+curl http://localhost:8080/api/clusters | jq
+
+# Get pods from default namespace
+curl http://localhost:8080/api/pods | jq '.items[0].metadata.name'
+```
+
+---
+
+## 🔍 Step 5: Troubleshooting
+
+### Issue: "TLS certificate verification failed"
+
+**Cause**: Kubeconfig contains incorrect certificate data or paths
+
+**Solution 1** - Regenerate kubeconfig:
+```bash
+aws eks update-kubeconfig --name your-cluster --kubeconfig kubeconfigs/eks-your-cluster.yaml --dry-run
+```
+
+**Solution 2** - Add insecure-skip-tls-verify (NOT recommended for production):
+```yaml
+# In kubeconfig file
+clusters:
+- cluster:
+    insecure-skip-tls-verify: true
+    server: https://xxx.eks.amazonaws.com
+```
+
+### Issue: "unable to authenticate"
+
+**Cause**: AWS credentials not available or expired
+
+**Check credentials:**
+```bash
+# Inside container
+docker exec atlas-prod aws sts get-caller-identity
+
+# Should return your AWS account and role
+```
+
+**Solutions:**
+- Verify IAM role has EKS access
+- Check AWS credentials are mounted correctly
+- Regenerate kubeconfig with latest credentials
+- Verify AWS_REGION environment variable
+
+### Issue: "failed to dial after 5 attempts: dial tcp: lookup redis"
+
+**Cause**: Redis container not running or wrong address
+
+**Solution:**
+```bash
+# Check Redis is running
+docker ps | grep redis
+
+# Check Redis connection from Atlas container
+docker exec atlas-prod redis-cli -h redis -a your-password ping
+
+# Should return: PONG
+```
+
+### Issue: "Cannot connect to Kubernetes cluster"
+
+**Check cluster accessibility:**
+```bash
+# Test from your machine
+kubectl --kubeconfig kubeconfigs/eks-prod-us-east-1.yaml get nodes
+
+# Test from container
+docker exec atlas-prod cat /app/kubeconfigs/eks-prod-us-east-1.yaml
+```
+
+**Verify security groups:**
+- EKS cluster security group must allow inbound traffic from Atlas host
+- Check EKS cluster endpoint is set to "Public" or "Public and Private"
+
+---
+
+## 📊 Step 6: Production Hardening
+
+### 6.1 Enable HTTPS with Nginx
+
+**Create nginx configuration:**
+```nginx
+# nginx-production.conf
+events {
+    worker_connections 1024;
+}
+
+http {
+    upstream atlas {
+        server atlas:8080;
+    }
+
+    server {
+        listen 80;
+        return 301 https://$host$request_uri;
+    }
+
+    server {
+        listen 443 ssl http2;
+        server_name atlas.example.com;
+
+        ssl_certificate /etc/nginx/certs/tls.crt;
+        ssl_certificate_key /etc/nginx/certs/tls.key;
+        ssl_protocols TLSv1.2 TLSv1.3;
+
+        location / {
+            proxy_pass http://atlas;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+        }
+    }
+}
+```
+
+**Uncomment nginx service** in `docker-compose.production.yml`
+
+### 6.2 Set Up Monitoring
+
+```bash
+# View logs
+docker-compose -f docker-compose.production.yml logs -f
+
+# Monitor resource usage
+docker stats atlas-prod atlas-redis-prod
+
+# Check application metrics
+curl http://localhost:8080/api/cache/stats | jq
+```
+
+### 6.3 Backup Configuration
+
+```bash
+# Backup kubeconfigs (encrypted)
+tar czf atlas-kubeconfigs-backup.tar.gz kubeconfigs/
+gpg -c atlas-kubeconfigs-backup.tar.gz
+rm atlas-kubeconfigs-backup.tar.gz
+
+# Backup Redis data
+docker run --rm -v atlas_redis-data:/data -v $(pwd):/backup \
+  alpine tar czf /backup/redis-backup.tar.gz /data
+```
+
+---
+
+## 🔄 Step 7: Maintenance
+
+### Updating Atlas
+
+```bash
+# Pull latest code
+git pull origin main
+
+# Rebuild with version tag
+export VERSION=1.1.0
+docker-compose -f docker-compose.production.yml up -d --build
+
+# Verify new version
+docker exec atlas-prod /app/atlas --version
+```
+
+### Scaling Redis
+
+For high-traffic deployments, consider:
+- **Redis Sentinel** for high availability
+- **Redis Cluster** for horizontal scaling
+- **AWS ElastiCache** for managed Redis
+
+### Log Rotation
+
+Logs are automatically rotated (configured in docker-compose):
+```yaml
+logging:
+  driver: "json-file"
+  options:
+    max-size: "50m"
+    max-file: "5"
+```
+
+---
+
+## 📁 File Structure
+
+Your production deployment should look like:
+
+```
+Atlas/
+├── config.yaml                          # Production config (from config.yaml.production)
+├── .env                                 # Environment variables (from .env.production)
+├── docker-compose.production.yml        # Production compose file
+├── Dockerfile                           # Atlas image definition
+├── kubeconfigs/                         # EKS kubeconfig files
+│   ├── eks-prod-us-east-1.yaml
+│   ├── eks-prod-us-west-2.yaml
+│   ├── eks-prod-eu-west-1.yaml
+│   └── eks-staging-us-east-1.yaml
+├── certs/                               # (Optional) TLS certificates
+│   ├── tls.crt
+│   └── tls.key
+└── nginx-production.conf                # (Optional) Nginx config
+```
+
+---
+
+## ✅ Production Checklist
+
+Before going live:
+
+- [ ] All EKS kubeconfig files generated and tested
+- [ ] config.yaml updated with correct API server URLs
+- [ ] Strong REDIS_PASSWORD set in .env
+- [ ] AWS credentials configured (IAM role or mounted credentials)
+- [ ] Security groups allow Atlas to reach EKS clusters
+- [ ] Redis persistence enabled and tested
+- [ ] Health checks passing for all services
+- [ ] HTTPS configured (if using Nginx)
+- [ ] Monitoring and alerting set up
+- [ ] Backup procedures documented and tested
+- [ ] Log aggregation configured
+- [ ] Resource limits set appropriately
+
+---
+
+## 🆘 Support
+
+For issues:
+1. Check logs: `docker-compose -f docker-compose.production.yml logs -f`
+2. Verify connectivity: Test kubectl access from host machine first
+3. Review troubleshooting section above
+4. Check AWS CloudWatch logs for EKS cluster issues
+
+---
+
+## 📚 Additional Resources
+
+- [EKS User Guide](https://docs.aws.amazon.com/eks/latest/userguide/)
+- [kubectl Configuration](https://kubernetes.io/docs/tasks/access-application-cluster/configure-access-multiple-clusters/)
+- [AWS IAM for EKS](https://docs.aws.amazon.com/eks/latest/userguide/security-iam.html)
+- [Redis Best Practices](https://redis.io/topics/admin)

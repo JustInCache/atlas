@@ -1282,13 +1282,6 @@ async function loadOverview() {
         // Update UI progressively
         updateClusterDetails(cluster, health);
         renderDashboardResourceGrid(health);
-        
-        // Update page subtitle
-        const subtitle = document.getElementById('dashboardSubtitle');
-        if (subtitle && cluster) {
-            const short = clusterShortName(cluster.cluster_name);
-            subtitle.textContent = `${short}${cluster.context_name && clusterShortName(cluster.context_name) !== short ? ' · ' + clusterShortName(cluster.context_name) : ''}`;
-        }
 
         console.log('✅ Overview loaded with priority-based batching');
 
