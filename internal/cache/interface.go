@@ -1,6 +1,9 @@
 package cache
 
-import "time"
+import (
+	"log"
+	"time"
+)
 
 // Cache defines the interface for all cache implementations.
 // This allows switching between in-memory and Redis-based caching.
@@ -74,10 +77,17 @@ type Config struct {
 }
 
 // New creates a new cache instance based on the provided configuration.
+// If Redis is unavailable, automatically falls back to in-memory cache.
 func New(config Config) (Cache, error) {
 	switch config.Type {
 	case "redis":
-		return NewRedisCache(config)
+		redisCache, err := NewRedisCache(config)
+		if err != nil {
+			// Automatically fallback to memory cache if Redis is unavailable
+			log.Printf("WARNING: Redis cache initialization failed, falling back to in-memory cache: %v", err)
+			return NewMemoryCache(config)
+		}
+		return redisCache, nil
 	case "memory", "":
 		return NewMemoryCache(config)
 	default:

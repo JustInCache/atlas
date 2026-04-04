@@ -1031,20 +1031,9 @@ func getHealth(application *app.App) http.HandlerFunc {
 		go func() {
 			defer wg.Done()
 			nodeCacheKey := "nodes:cluster"
-			if cachedNodes, ok := application.Cache.Get(nodeCacheKey); ok {
+			if cachedNodes, ok := GetSliceFromCache(application, nodeCacheKey); ok {
 				mu.Lock()
-				// Safely convert cached data
-				if nodes, ok := cachedNodes.([]map[string]interface{}); ok {
-					nodeList = nodes
-				} else if nodesSlice, ok := cachedNodes.([]interface{}); ok {
-					// Convert []interface{} to []map[string]interface{}
-					nodeList = make([]map[string]interface{}, len(nodesSlice))
-					for i, node := range nodesSlice {
-						if nodeMap, ok := node.(map[string]interface{}); ok {
-							nodeList[i] = nodeMap
-						}
-					}
-				}
+				nodeList = cachedNodes
 				mu.Unlock()
 				return
 			}
@@ -1869,11 +1858,17 @@ func getPVPVC(application *app.App) http.HandlerFunc {
 		for _, pvc := range pvcList.Items {
 			switch pvc.Status.Phase {
 			case "Bound":
-				summary["bound_pvcs"] = summary["bound_pvcs"].(int) + 1
+				if count, ok := summary["bound_pvcs"].(int); ok {
+					summary["bound_pvcs"] = count + 1
+				}
 			case "Pending":
-				summary["pending_pvcs"] = summary["pending_pvcs"].(int) + 1
+				if count, ok := summary["pending_pvcs"].(int); ok {
+					summary["pending_pvcs"] = count + 1
+				}
 			case "Lost":
-				summary["lost_pvcs"] = summary["lost_pvcs"].(int) + 1
+				if count, ok := summary["lost_pvcs"].(int); ok {
+					summary["lost_pvcs"] = count + 1
+				}
 			}
 		}
 
@@ -2144,13 +2139,14 @@ func getCronJobsAndJobs(application *app.App) http.HandlerFunc {
 					"age":         age,
 				}
 
-				// Safely append to jobs list
-				if jobsList, ok := cj["jobs"].([]map[string]interface{}); ok {
-					cj["jobs"] = append(jobsList, jobData)
-				} else if jobsInterface, ok := cj["jobs"].([]interface{}); ok {
-					cj["jobs"] = append(jobsInterface, jobData)
-				} else {
-					// Initialize if not set
+				// Safely append to jobs list - handle different types from cache
+				switch jobsData := cj["jobs"].(type) {
+				case []map[string]interface{}:
+					cj["jobs"] = append(jobsData, jobData)
+				case []interface{}:
+					cj["jobs"] = append(jobsData, jobData)
+				default:
+					// Initialize if not set or unexpected type
 					cj["jobs"] = []map[string]interface{}{jobData}
 				}
 			}

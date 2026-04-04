@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"sync/atomic"
 	"time"
 
@@ -31,6 +32,14 @@ func NewRedisCache(config Config) (*RedisCache, error) {
 		Addr:     config.RedisAddr,
 		Password: config.RedisPassword,
 		DB:       config.RedisDB,
+		// Connection pool configuration for production
+		PoolSize:     50,              // Max connections (default: 10*GOMAXPROCS)
+		MinIdleConns: 10,              // Keep warm connections
+		MaxRetries:   3,               // Retry failed commands
+		DialTimeout:  5 * time.Second, // Connection timeout
+		ReadTimeout:  3 * time.Second, // Read timeout
+		WriteTimeout: 3 * time.Second, // Write timeout
+		PoolTimeout:  4 * time.Second, // Pool get timeout
 	})
 
 	// Verify connection
@@ -38,8 +47,11 @@ func NewRedisCache(config Config) (*RedisCache, error) {
 	defer cancel()
 
 	if err := client.Ping(ctx).Err(); err != nil {
+		log.Printf("WARNING: Redis unavailable at %s: %v - Application will fallback to in-memory cache", config.RedisAddr, err)
 		return nil, fmt.Errorf("redis connection failed: %w", err)
 	}
+
+	log.Printf("Redis cache initialized successfully at %s (DB: %d, ClusterID: %s)", config.RedisAddr, config.RedisDB, config.ClusterID)
 
 	return &RedisCache{
 		client:    client,
@@ -70,6 +82,7 @@ func (c *RedisCache) Get(key string) (interface{}, bool) {
 	}
 
 	if err != nil {
+		log.Printf("ERROR: Redis Get failed for key '%s': %v", key, err)
 		if c.metrics {
 			c.misses.Add(1)
 		}
@@ -78,6 +91,7 @@ func (c *RedisCache) Get(key string) (interface{}, bool) {
 
 	var data interface{}
 	if err := json.Unmarshal([]byte(val), &data); err != nil {
+		log.Printf("ERROR: Failed to unmarshal Redis cache data for key '%s': %v", key, err)
 		if c.metrics {
 			c.misses.Add(1)
 		}
@@ -114,7 +128,7 @@ func (c *RedisCache) SetWithVersion(key string, data interface{}, resourceVersio
 
 	_, err = pipe.Exec(ctx)
 	if err != nil {
-		// Log error but don't fail - cache write failures shouldn't break the app
+		log.Printf("[WARN] Redis cache: Failed to set key '%s': %v", key, err)
 		return
 	}
 }
@@ -122,8 +136,14 @@ func (c *RedisCache) SetWithVersion(key string, data interface{}, resourceVersio
 // GetResourceVersion retrieves the stored resource version for cached data.
 func (c *RedisCache) GetResourceVersion(key string) (string, bool) {
 	ctx := context.Background()
-	val, err := c.client.Get(ctx, c.buildKey(key+":version")).Result()
 
+	// Check if main data exists first to avoid returning stale version
+	exists, err := c.client.Exists(ctx, c.buildKey(key)).Result()
+	if err != nil || exists == 0 {
+		return "", false
+	}
+
+	val, err := c.client.Get(ctx, c.buildKey(key+":version")).Result()
 	if err != nil {
 		return "", false
 	}
@@ -176,7 +196,9 @@ func (c *RedisCache) Delete(key string) {
 	pipe.Del(ctx, c.buildKey(key+":version"))
 
 	deleted, err := pipe.Exec(ctx)
-	if err == nil && c.metrics && len(deleted) > 0 {
+	if err != nil {
+		log.Printf("[WARN] Redis cache: Failed to delete key '%s': %v", key, err)
+	} else if c.metrics && len(deleted) > 0 {
 		c.evictions.Add(1)
 	}
 }

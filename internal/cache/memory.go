@@ -14,6 +14,7 @@ type MemoryCache struct {
 	data         map[string]CacheEntry
 	mu           sync.RWMutex
 	requestGroup singleflight.Group
+	stopCleanup  chan struct{}
 
 	// Metrics
 	hits      atomic.Int64
@@ -29,12 +30,38 @@ type CacheEntry struct {
 	ExpiresAt       time.Time
 }
 
-// NewMemoryCache creates a new in-memory cache instance.
+// NewMemoryCache creates a new in-memory cache instance with auto-cleanup.
 func NewMemoryCache(config Config) (*MemoryCache, error) {
-	return &MemoryCache{
-		data:    make(map[string]CacheEntry),
-		metrics: config.EnableMetrics,
-	}, nil
+	c := &MemoryCache{
+		data:        make(map[string]CacheEntry),
+		metrics:     config.EnableMetrics,
+		stopCleanup: make(chan struct{}),
+	}
+
+	// Auto-start cleanup routine
+	go c.autoCleanupRoutine()
+
+	return c, nil
+}
+
+// autoCleanupRoutine automatically cleans expired entries every 5 minutes
+func (c *MemoryCache) autoCleanupRoutine() {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			c.CleanExpired()
+		case <-c.stopCleanup:
+			return
+		}
+	}
+}
+
+// StopCleanup stops the automatic cleanup routine (for graceful shutdown)
+func (c *MemoryCache) StopCleanup() {
+	close(c.stopCleanup)
 }
 
 // Get retrieves data from cache by key.

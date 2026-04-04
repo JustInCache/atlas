@@ -1,9 +1,13 @@
 package httpapi
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"atlas/internal/app"
 
@@ -248,20 +252,29 @@ func getCacheStatsHandler(app *app.App) http.HandlerFunc {
 	}
 }
 
-// getUserID extracts user ID from request.
-// In production, this would decode JWT or session token.
-// For now, use a simple header or default value.
+// getUserID extracts user ID from request with persistent session management.
+// Priority: Auth header > Session cookie > Generate new session
 func getUserID(r *http.Request) string {
-	// Try to get from header
+	// 1. Check auth header (for API clients)
 	if userID := r.Header.Get("X-User-ID"); userID != "" {
 		return userID
 	}
 
-	// Try to get from cookie
-	if cookie, err := r.Cookie("user_id"); err == nil {
+	// 2. Check existing session cookie
+	if cookie, err := r.Cookie("atlas_session"); err == nil && cookie.Value != "" {
 		return cookie.Value
 	}
 
-	// Default to IP address as user identifier
-	return r.RemoteAddr
+	// 3. Generate new persistent session ID
+	return generateSessionID()
+}
+
+// generateSessionID creates a cryptographically secure random session ID
+func generateSessionID() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		// Fallback to timestamp-based ID
+		return fmt.Sprintf("session_%d", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(b)
 }

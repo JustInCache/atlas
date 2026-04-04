@@ -3,6 +3,9 @@ package config
 import (
 	"fmt"
 	"os"
+	"os/user"
+	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -106,35 +109,59 @@ func LoadWithEnvOverrides(configPath string) (*Config, error) {
 	return cfg, nil
 }
 
-// Validate checks if the configuration is valid
-func (c *Config) Validate() error {
-	// If multi-cluster is enabled, require at least one cluster
-	if c.Features.MultiCluster && len(c.Clusters) == 0 {
-		return fmt.Errorf("multi-cluster mode is enabled but no clusters are defined in config.yaml")
+// expandPath expands ~ and environment variables in file paths
+func expandPath(path string) string {
+	// Expand environment variables
+	path = os.ExpandEnv(path)
+
+	// Expand ~ to home directory
+	if strings.HasPrefix(path, "~/") {
+		if usr, err := user.Current(); err == nil {
+			path = filepath.Join(usr.HomeDir, path[2:])
+		}
+	} else if path == "~" {
+		if usr, err := user.Current(); err == nil {
+			path = usr.HomeDir
+		}
 	}
 
-	// Validate cluster configurations
-	clusterIDs := make(map[string]bool)
-	for i, cluster := range c.Clusters {
-		if cluster.ID == "" {
-			return fmt.Errorf("cluster at index %d is missing 'id' field", i)
-		}
-		if cluster.Name == "" {
-			return fmt.Errorf("cluster '%s' is missing 'name' field", cluster.ID)
-		}
-		if cluster.Kubeconfig == "" {
-			return fmt.Errorf("cluster '%s' is missing 'kubeconfig' field", cluster.ID)
+	return path
+}
+
+// Validate checks if the configuration is valid
+func (c *Config) Validate() error {
+	if c.Features.MultiCluster {
+		if len(c.Clusters) == 0 {
+			return fmt.Errorf("multi-cluster mode enabled but no clusters defined")
 		}
 
-		// Check for duplicate IDs
-		if clusterIDs[cluster.ID] {
-			return fmt.Errorf("duplicate cluster ID: %s", cluster.ID)
-		}
-		clusterIDs[cluster.ID] = true
+		clusterIDs := make(map[string]bool)
+		for i, cluster := range c.Clusters {
+			if cluster.ID == "" {
+				return fmt.Errorf("cluster at index %d is missing 'id' field", i)
+			}
+			if cluster.Name == "" {
+				return fmt.Errorf("cluster '%s' is missing 'name' field", cluster.ID)
+			}
+			if cluster.Kubeconfig == "" {
+				return fmt.Errorf("cluster '%s' is missing 'kubeconfig' field", cluster.ID)
+			}
 
-		// Check if kubeconfig file exists
-		if _, err := os.Stat(cluster.Kubeconfig); os.IsNotExist(err) {
-			return fmt.Errorf("kubeconfig file not found for cluster '%s': %s", cluster.ID, cluster.Kubeconfig)
+			// Expand path and update config
+			expandedPath := expandPath(cluster.Kubeconfig)
+			c.Clusters[i].Kubeconfig = expandedPath
+
+			// Check for duplicate IDs
+			if clusterIDs[cluster.ID] {
+				return fmt.Errorf("duplicate cluster ID: %s", cluster.ID)
+			}
+			clusterIDs[cluster.ID] = true
+
+			// Check if kubeconfig file exists
+			if _, err := os.Stat(expandedPath); os.IsNotExist(err) {
+				return fmt.Errorf("kubeconfig file not found for cluster '%s': %s (expanded from: %s)",
+					cluster.ID, expandedPath, cluster.Kubeconfig)
+			}
 		}
 	}
 
