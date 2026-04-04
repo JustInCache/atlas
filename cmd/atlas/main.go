@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"atlas/internal/app"
+	"atlas/internal/cache"
+	"atlas/internal/cluster"
 	"atlas/internal/httpapi"
 	"atlas/internal/k8s"
 )
@@ -22,30 +24,75 @@ func main() {
 	}))
 	slog.SetDefault(logger)
 
-	logger.Info("Starting Ajna Kubernetes Dashboard")
+	logger.Info("Starting Atlas Kubernetes Dashboard")
 
-	// Initialize Kubernetes client
-	client, err := k8s.NewClient()
-	if err != nil {
-		log.Fatalf("Failed to create Kubernetes client: %v", err)
+	// Get configuration from environment
+	cacheType := getEnv("CACHE_TYPE", "memory")
+	clusterID := getEnv("CLUSTER_ID", "default")
+	multiClusterMode := getEnv("MULTI_CLUSTER", "false") == "true"
+
+	// Initialize cache
+	cacheConfig := cache.Config{
+		Type:          cacheType,
+		RedisAddr:     getEnv("REDIS_ADDR", "localhost:6379"),
+		RedisPassword: getEnv("REDIS_PASSWORD", ""),
+		RedisDB:       0,
+		ClusterID:     clusterID,
+		EnableMetrics: true,
 	}
 
-	// Initialize application with cache and logger
-	application := app.New(client, logger)
+	cacheImpl, err := cache.New(cacheConfig)
+	if err != nil {
+		log.Fatalf("Failed to create cache: %v", err)
+	}
 
-	ctx := context.Background()
+	logger.Info("Cache initialized", "type", cacheType, "cluster_id", clusterID)
 
-	// Start background cache cleanup (every 5 minutes)
-	application.Cache.StartCleanupRoutine(ctx, 5*time.Minute)
+	var application *app.App
+
+	if multiClusterMode {
+		// Multi-cluster mode
+		logger.Info("Starting in multi-cluster mode")
+		clusterManager := cluster.NewManager(cacheImpl)
+
+		// Add clusters from configuration
+		// In production, load from config file or API
+		// For now, just add the default cluster
+		_, err := k8s.NewClient()
+		if err != nil {
+			log.Fatalf("Failed to create Kubernetes client: %v", err)
+		}
+
+		clusterManager.AddCluster(cluster.ClusterConfig{
+			ID:         clusterID,
+			Name:       getEnv("CLUSTER_NAME", "Default Cluster"),
+			Kubeconfig: getEnv("KUBECONFIG", ""),
+			APIServer:  "https://kubernetes.default.svc",
+			Region:     getEnv("CLUSTER_REGION", ""),
+		})
+
+		application = app.NewWithClusterManager(clusterManager, cacheImpl, logger)
+	} else {
+		// Single cluster mode (legacy)
+		logger.Info("Starting in single-cluster mode")
+		k8sClient, err := k8s.NewClient()
+		if err != nil {
+			log.Fatalf("Failed to create Kubernetes client: %v", err)
+		}
+		application = app.New(k8sClient, cacheImpl, logger)
+	}
+
+	// Start cache cleanup if using memory cache
+	if memCache, ok := cacheImpl.(*cache.MemoryCache); ok {
+		stopCleanup := memCache.StartCleanupRoutine(5 * time.Minute)
+		defer stopCleanup()
+		logger.Info("Started memory cache cleanup routine")
+	}
 
 	// Setup HTTP routes
 	router := httpapi.SetupRoutes(application)
 
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
-	}
-
+	port := getEnv("PORT", "8080")
 	logger.Info("Starting HTTP server", "port", port)
 
 	// Configure HTTP server with timeouts for production use
@@ -70,7 +117,7 @@ func main() {
 		}
 	}()
 
-	logger.Info("Server started successfully", "port", port)
+	logger.Info("Server started successfully", "port", port, "multi_cluster", multiClusterMode)
 
 	// Wait for interrupt signal
 	<-sigChan
@@ -87,4 +134,12 @@ func main() {
 	}
 
 	logger.Info("Server stopped gracefully")
+}
+
+// getEnv retrieves an environment variable or returns a default value.
+func getEnv(key, defaultValue string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return defaultValue
 }

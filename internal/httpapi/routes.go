@@ -72,6 +72,14 @@ func SetupRoutes(application *app.App) *mux.Router {
 	r.HandleFunc("/api/cache/clear", clearCache(application)).Methods("POST")
 	r.HandleFunc("/api/cache/stats", getCacheStats(application)).Methods("GET")
 
+	// Multi-cluster management endpoints
+	r.HandleFunc("/api/clusters", getClustersHandler(application)).Methods("GET")
+	r.HandleFunc("/api/cluster/current", getCurrentClusterHandler(application)).Methods("GET")
+	r.HandleFunc("/api/cluster/switch", switchClusterHandler(application)).Methods("POST")
+	r.HandleFunc("/api/cluster/{id}", getClusterInfoHandler(application)).Methods("GET")
+	r.HandleFunc("/api/clusters/health", getClusterHealthHandler(application)).Methods("GET")
+	r.HandleFunc("/api/cache/stats", getCacheStatsHandler(application)).Methods("GET")
+
 	return r
 }
 

@@ -189,6 +189,12 @@
             <div class="clock-time" id="selectedClock">--:--:--</div>
           </div>
         </div>
+        <div class="cluster-selector-wrap" id="clusterSelectorWrap" style="display: none;">
+          <span class="cluster-selector-label">Cluster:</span>
+          <select id="clusterSelect" onchange="switchCluster()" class="cluster-select">
+            <option value="">Loading...</option>
+          </select>
+        </div>
         <div class="ns-selector-wrap">
           <span class="ns-selector-label">Namespace:</span>
           <select id="namespaceSelect" onchange="changeNamespace()" class="ns-select">

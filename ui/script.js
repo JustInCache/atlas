@@ -946,6 +946,169 @@ function changeNamespace() {
     refreshCurrentTab();
 }
 
+/* ============================================
+   MULTI-CLUSTER MANAGEMENT
+   ============================================ */
+
+let currentClusterID = 'default';
+let multiClusterMode = false;
+
+// Load available clusters from the API
+async function loadClusters() {
+    try {
+        const response = await fetch('/api/cluster/current');
+        if (!response.ok) {
+            console.log('Multi-cluster mode not enabled');
+            return;
+        }
+        
+        const data = await response.json();
+        multiClusterMode = data.mode === 'multi-cluster';
+        currentClusterID = data.cluster_id;
+        
+        if (!multiClusterMode) {
+            // Hide cluster selector in single-cluster mode
+            const clusterSelectorWrap = document.getElementById('clusterSelectorWrap');
+            if (clusterSelectorWrap) {
+                clusterSelectorWrap.style.display = 'none';
+            }
+            return;
+        }
+        
+        // Show cluster selector
+        const clusterSelectorWrap = document.getElementById('clusterSelectorWrap');
+        if (clusterSelectorWrap) {
+            clusterSelectorWrap.style.display = 'flex';
+        }
+        
+        // Load list of clusters
+        const clustersResponse = await fetch('/api/clusters');
+        if (clustersResponse.ok) {
+            const clusters = await clustersResponse.json();
+            populateClusterSelector(clusters, currentClusterID);
+        }
+    } catch (error) {
+        console.error('Error loading clusters:', error);
+        multiClusterMode = false;
+    }
+}
+
+// Populate the cluster selector dropdown
+function populateClusterSelector(clusters, selectedClusterID) {
+    const clusterSelect = document.getElementById('clusterSelect');
+    if (!clusterSelect) return;
+    
+    clusterSelect.innerHTML = '';
+    
+    clusters.forEach(cluster => {
+        const option = document.createElement('option');
+        option.value = cluster.id;
+        option.textContent = `${cluster.name} (${cluster.region || cluster.id})`;
+        
+        if (cluster.id === selectedClusterID) {
+            option.selected = true;
+        }
+        
+        // Add status indicator
+        if (cluster.status) {
+            const statusIcon = cluster.status === 'healthy' ? '✓' : 
+                              cluster.status === 'unhealthy' ? '✗' : '○';
+            option.textContent = `${statusIcon} ${option.textContent}`;
+        }
+        
+        clusterSelect.appendChild(option);
+    });
+}
+
+// Switch to a different cluster
+async function switchCluster() {
+    const clusterSelect = document.getElementById('clusterSelect');
+    if (!clusterSelect) return;
+    
+    const newClusterID = clusterSelect.value;
+    if (newClusterID === currentClusterID) return;
+    
+    try {
+        // Show loading indicator
+        showClusterSwitching(newClusterID);
+        
+        // Call API to switch cluster
+        const response = await fetch('/api/cluster/switch', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ cluster_id: newClusterID })
+        });
+        
+        if (!response.ok) {
+            throw new Error('Failed to switch cluster');
+        }
+        
+        currentClusterID = newClusterID;
+        
+        // Clear all caches and reload
+        tabDataCache = {};
+        clearAllAutoRefresh();
+        
+        // Reload cluster info and current tab
+        await loadClusterInfo();
+        refreshCurrentTab();
+        
+        showClusterSwitched(newClusterID);
+        
+    } catch (error) {
+        console.error('Error switching cluster:', error);
+        showErrorBanner(
+            'error',
+            'Cluster Switch Failed',
+            `Failed to switch to cluster: ${error.message}`,
+            [{ text: 'Retry', action: switchCluster }]
+        );
+        
+        // Revert selector to current cluster
+        clusterSelect.value = currentClusterID;
+    }
+}
+
+// Show cluster switching indicator
+function showClusterSwitching(clusterID) {
+    const banner = document.createElement('div');
+    banner.id = 'clusterSwitchBanner';
+    banner.className = 'namespace-loading-banner';
+    banner.innerHTML = `
+        <div class="spinner"></div>
+        <span>Switching to cluster: <strong>${clusterID}</strong></span>
+    `;
+    const contentPane = document.querySelector('.content-pane');
+    if (contentPane) contentPane.insertAdjacentElement('afterbegin', banner);
+}
+
+// Show cluster switched success
+function showClusterSwitched(clusterID) {
+    const existing = document.getElementById('clusterSwitchBanner');
+    if (existing) existing.remove();
+    
+    const banner = document.createElement('div');
+    banner.id = 'clusterSwitchBanner';
+    banner.className = 'namespace-loaded-banner';
+    banner.innerHTML = `
+        <span class="checkmark">✓</span>
+        <span>Switched to: <strong>${clusterID}</strong></span>
+    `;
+    const contentPane = document.querySelector('.content-pane');
+    if (contentPane) contentPane.insertAdjacentElement('afterbegin', banner);
+    
+    // Auto-hide after 2 seconds
+    setTimeout(() => {
+        const indicator = document.getElementById('clusterSwitchBanner');
+        if (indicator) {
+            indicator.classList.add('namespace-indicator-fade-out');
+            setTimeout(() => indicator.remove(), 400);
+        }
+    }, 2000);
+}
+
 // Show/hide a warning banner when All Namespaces is active on data-heavy tabs
 // Note: "All Namespaces" feature has been removed for performance reasons
 function updateAllNsBanner() {
@@ -6683,6 +6846,9 @@ document.addEventListener('DOMContentLoaded', () => {
         
         initializeClocks();
         console.log('✓ Clocks initialized');
+        
+        loadClusters();
+        console.log('⟳ Loading clusters...');
         
         loadClusterInfo();
         console.log('⟳ Loading cluster info...');

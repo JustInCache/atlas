@@ -1,0 +1,106 @@
+version: '3.8'
+
+services:
+  # ============================================
+  # Redis Service (for shared cache)
+  # ============================================
+  redis:
+    image: redis:7-alpine
+    container_name: atlas-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-}
+    networks:
+      - atlas-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  # ============================================
+  # Atlas Instance 1 (Cluster: prod-us-east)
+  # ============================================
+  atlas-prod-us:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: atlas-prod-us
+    environment:
+      - CACHE_TYPE=redis
+      - REDIS_ADDR=redis:6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      - REDIS_DB=0
+      - CLUSTER_ID=prod-us-east
+      - CLUSTER_NAME=Production US East
+      - CLUSTER_REGION=us-east-1
+      - MULTI_CLUSTER=true
+      - PORT=8080
+    volumes:
+      - ./kubeconfigs/prod-us-east:/etc/kubeconfig:ro
+    ports:
+      - "8080:8080"
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - atlas-network
+    restart: unless-stopped
+
+  # ============================================
+  # Atlas Instance 2 (Cluster: prod-eu-west)
+  # Optional - uncomment to enable second instance
+  # ============================================
+  # atlas-prod-eu:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #   container_name: atlas-prod-eu
+  #   environment:
+  #     - CACHE_TYPE=redis
+  #     - REDIS_ADDR=redis:6379
+  #     - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+  #     - REDIS_DB=0
+  #     - CLUSTER_ID=prod-eu-west
+  #     - CLUSTER_NAME=Production EU West
+  #     - CLUSTER_REGION=eu-west-1
+  #     - MULTI_CLUSTER=true
+  #     - PORT=8080
+  #   volumes:
+  #     - ./kubeconfigs/prod-eu-west:/etc/kubeconfig:ro
+  #   ports:
+  #     - "8081:8080"
+  #   depends_on:
+  #     redis:
+  #       condition: service_healthy
+  #   networks:
+  #     - atlas-network
+  #   restart: unless-stopped
+
+  # ============================================
+  # Load Balancer (Optional)
+  # Uncomment to enable load balancing across instances
+  # ============================================
+  # nginx:
+  #   image: nginx:alpine
+  #   container_name: atlas-lb
+  #   ports:
+  #     - "80:80"
+  #   volumes:
+  #     - ./nginx.conf:/etc/nginx/nginx.conf:ro
+  #   depends_on:
+  #     - atlas-prod-us
+  #     - atlas-prod-eu
+  #   networks:
+  #     - atlas-network
+  #   restart: unless-stopped
+
+networks:
+  atlas-network:
+    driver: bridge
+
+volumes:
+  redis-data:
+    driver: local
