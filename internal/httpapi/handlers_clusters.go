@@ -281,23 +281,29 @@ func getCacheStatsHandler(app *app.App) http.HandlerFunc {
 	}
 }
 
-// getUserID extracts user ID from request with persistent session management.
-// Priority: Auth header > Session cookie > Generate new session
+// getUserID extracts user ID from request.
+// When deployed behind OAuth2 Proxy (Azure AD), trusts forwarded headers.
+// Priority: OAuth2 Proxy headers > Session cookie > Generate session
 func getUserID(r *http.Request) string {
-	// 1. Check auth header (for API clients)
-	if userID := r.Header.Get("X-User-ID"); userID != "" {
-		return userID
+	// 1. Check OAuth2 Proxy headers (from Azure AD) - TRUSTED source
+	// These headers are only set when user is authenticated via Azure AD
+	if email := r.Header.Get("X-Forwarded-Email"); email != "" {
+		return email // e.g., user@company.com
+	}
+	if user := r.Header.Get("X-Forwarded-User"); user != "" {
+		return user
 	}
 
-	// 2. Check existing session cookie
+	// 2. Check existing session cookie (fallback for direct access in dev)
 	if cookie, err := r.Cookie("atlas_session"); err == nil && cookie.Value != "" {
 		return cookie.Value
 	}
 
-	// 3. Generate new persistent session ID
+	// 3. Generate new session ID (shouldn't happen with OAuth2 Proxy)
 	return generateSessionID()
 }
 
+// Only OAuth2 Proxy headers (X-Forwarded-Email, X-Forwarded-User) are trusted.
 // generateSessionID creates a cryptographically secure random session ID
 func generateSessionID() string {
 	b := make([]byte, 16)
