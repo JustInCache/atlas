@@ -2,6 +2,7 @@ package cache
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -28,19 +29,26 @@ type RedisCache struct {
 
 // NewRedisCache creates a new Redis-backed cache instance.
 func NewRedisCache(config Config) (*RedisCache, error) {
-	client := redis.NewClient(&redis.Options{
-		Addr:     config.RedisAddr,
-		Password: config.RedisPassword,
-		DB:       config.RedisDB,
-		// Connection pool configuration for production
-		PoolSize:     50,              // Max connections (default: 10*GOMAXPROCS)
-		MinIdleConns: 10,              // Keep warm connections
-		MaxRetries:   3,               // Retry failed commands
-		DialTimeout:  5 * time.Second, // Connection timeout
-		ReadTimeout:  3 * time.Second, // Read timeout
-		WriteTimeout: 3 * time.Second, // Write timeout
-		PoolTimeout:  4 * time.Second, // Pool get timeout
-	})
+	opts := &redis.Options{
+		Addr:         config.RedisAddr,
+		Password:     config.RedisPassword,
+		DB:           config.RedisDB,
+		PoolSize:     50,
+		MinIdleConns: 10,
+		MaxRetries:   3,
+		DialTimeout:  5 * time.Second,
+		ReadTimeout:  3 * time.Second,
+		WriteTimeout: 3 * time.Second,
+		PoolTimeout:  4 * time.Second,
+	}
+
+	if config.RedisTLS {
+		opts.TLSConfig = &tls.Config{
+			MinVersion: tls.VersionTLS12,
+		}
+	}
+
+	client := redis.NewClient(opts)
 
 	// Verify connection
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

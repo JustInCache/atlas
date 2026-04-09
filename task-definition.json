@@ -1,0 +1,62 @@
+{
+    "family": "atlas",
+    "networkMode": "awsvpc",
+    "requiresCompatibilities": ["FARGATE"],
+    "cpu": "512",
+    "runtimePlatform": {
+      "cpuArchitecture": "X86_64",
+      "operatingSystemFamily": "LINUX"
+    },
+    "memory": "1024",
+    "executionRoleArn": "arn:aws:iam::676894657875:role/atlas-ecs-execution-role",
+    "taskRoleArn": "arn:aws:iam::676894657875:role/atlas-ecs-task-role",
+    "containerDefinitions": [
+      {
+        "name": "atlas",
+        "image": "676894657875.dkr.ecr.us-west-2.amazonaws.com/atlas:latest",
+        "portMappings": [
+          { "containerPort": 8080, "protocol": "tcp" }
+        ],
+        "environment": [
+          { "name": "PORT", "value": "8080" },
+          { "name": "CACHE_TYPE", "value": "redis" },
+          { "name": "REDIS_ADDR", "value": "atlas-cache-s9gajm.serverless.usw2.cache.amazonaws.com:6379" },
+          { "name": "KUBECONFIG_ENV_MAP", "value": "qa10=KUBECONFIG_QA10,qa11=KUBECONFIG_QA11" }
+        ],
+        "secrets": [
+          {
+            "name": "REDIS_PASSWORD",
+            "valueFrom": "arn:aws:secretsmanager:us-west-2:676894657875:secret:atlas/redis-password-h6njOA:redis_password::"
+          },
+          {
+            "name": "CONFIG_YAML",
+            "valueFrom": "arn:aws:secretsmanager:us-west-2:676894657875:secret:atlas/redis-password-h6njOA:config_yaml::"
+          },
+          {
+            "name": "KUBECONFIG_QA10",
+            "valueFrom": "arn:aws:secretsmanager:us-west-2:676894657875:secret:atlas/redis-password-h6njOA:kubeconfig_qa10::"
+          },
+          {
+            "name": "KUBECONFIG_QA11",
+            "valueFrom": "arn:aws:secretsmanager:us-west-2:676894657875:secret:atlas/redis-password-h6njOA:kubeconfig_qa11::"
+          }
+        ],
+        "healthCheck": {
+          "command": ["CMD-SHELL", "wget -q --spider http://localhost:8080/healthz || exit 1"],
+          "interval": 30,
+          "timeout": 5,
+          "retries": 3,
+          "startPeriod": 40
+        },
+        "logConfiguration": {
+          "logDriver": "awslogs",
+          "options": {
+            "awslogs-group": "/ecs/atlas",
+            "awslogs-region": "us-west-2",
+            "awslogs-stream-prefix": "atlas"
+          }
+        },
+        "essential": true
+      }
+    ]
+  }

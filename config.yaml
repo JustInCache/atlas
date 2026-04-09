@@ -1,52 +1,33 @@
 # Atlas Production Configuration - AWS EKS
-# This configuration is designed for multi-cluster EKS deployments
+# Deployed on ECS Fargate with ElastiCache Valkey
 
 # Server configuration
 server:
   port: 8080
 
-# Cache configuration - Redis recommended for production
+# Cache configuration - ElastiCache Valkey (Serverless)
 cache:
   type: redis
   redis:
-    addr: "redis:6379"
-    password: ""  # Set via REDIS_PASSWORD env var
+    addr: "atlas-cache-s9gajm.serverless.usw2.cache.amazonaws.com:6379"
+    password: ""
     db: 0
+    tls: true
 
 # Feature flags
 features:
   multi_cluster: true
 
 # EKS Clusters
-# Kubeconfig paths are relative to the container filesystem
 clusters:
-  - id: prod-us-east-1
-    name: "Production US East 1"
-    kubeconfig: /app/kubeconfigs/eks-prod-us-east-1.yaml
-    api_server: https://XXXXX.gr7.us-east-1.eks.amazonaws.com
-    region: us-east-1
-
-  - id: prod-us-west-2
-    name: "Production US West 2"
-    kubeconfig: /app/kubeconfigs/eks-prod-us-west-2.yaml
-    api_server: https://XXXXX.gr7.us-west-2.eks.amazonaws.com
+  - id: qa10
+    name: "qa10"
+    kubeconfig: /app/kubeconfigs/qa10.yaml
+    api_server: https://BF98936C7C74560F33F6E27420467B77.gr7.us-west-2.eks.amazonaws.com
     region: us-west-2
 
-  - id: prod-eu-west-1
-    name: "Production EU West 1"
-    kubeconfig: /app/kubeconfigs/eks-prod-eu-west-1.yaml
-    api_server: https://XXXXX.d2.eu-west-1.eks.amazonaws.com
-    region: eu-west-1
-
-  - id: staging-us-east-1
-    name: "Staging US East 1"
-    kubeconfig: /app/kubeconfigs/eks-staging-us-east-1.yaml
-    api_server: https://XXXXX.gr7.us-east-1.eks.amazonaws.com
-    region: us-east-1
-
-# Notes:
-# 1. Replace XXXXX with your actual EKS cluster IDs
-# 2. Kubeconfig files must be generated with: aws eks update-kubeconfig --name <cluster-name> --kubeconfig <file>
-# 3. For production, ensure kubeconfig files use IAM authenticator (default for EKS)
-# 4. Mount kubeconfigs directory as read-only volume in docker-compose
-# 5. AWS credentials must be available in the container (via IAM role or mounted credentials)
+  - id: qa11
+    name: "qa11"
+    kubeconfig: /app/kubeconfigs/qa11.yaml
+    api_server: https://F12E980CFD9C64B0D85A7C85FE5973D2.gr7.us-west-2.eks.amazonaws.com
+    region: us-west-2

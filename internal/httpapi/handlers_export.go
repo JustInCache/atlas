@@ -18,6 +18,7 @@ import (
 	apiextensionsclientset "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 )
 
+
 // Supported resource types for export
 var exportResourceTypes = map[string]bool{
 	"pods":        true,
@@ -57,31 +58,37 @@ func getExport(application *app.App) http.HandlerFunc {
 			return
 		}
 
-		ctx := r.Context()
-		var data interface{}
-		var err error
+	k8sClient, err := getK8sClient(application, r)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to get k8s client: %v", err), http.StatusInternalServerError)
+		return
+	}
 
-		switch resourceType {
-		case "pods":
-			data, err = fetchPodsForExport(application, ctx, namespace)
-		case "services":
-			data, err = fetchServicesForExport(application, ctx, namespace)
-		case "deployments":
-			data, err = fetchDeploymentsForExport(application, ctx, namespace)
-		case "ingresses":
-			data, err = fetchIngressesForExport(application, ctx, namespace)
-		case "configmaps":
-			data, err = fetchConfigMapsForExport(application, ctx, namespace)
-		case "secrets":
-			data, err = fetchSecretsForExport(application, ctx, namespace)
-		case "resources":
-			data, err = fetchResourcesForExport(application, ctx, namespace)
-		case "pvpvc":
-			data, err = fetchPVPVCForExport(application, ctx, namespace)
-		case "crds":
-			data, err = fetchCRDsForExport(application, ctx)
-		case "health":
-			data, err = fetchHealthForExport(application, ctx, namespace)
+	clusterID := getClusterID(application, r)
+	ctx := r.Context()
+	var data interface{}
+
+	switch resourceType {
+	case "pods":
+		data, err = fetchPodsForExport(application, k8sClient, ctx, namespace, clusterID)
+	case "services":
+		data, err = fetchServicesForExport(application, k8sClient, ctx, namespace)
+	case "deployments":
+		data, err = fetchDeploymentsForExport(application, k8sClient, ctx, namespace, clusterID)
+	case "ingresses":
+		data, err = fetchIngressesForExport(application, k8sClient, ctx, namespace)
+	case "configmaps":
+		data, err = fetchConfigMapsForExport(application, k8sClient, ctx, namespace)
+	case "secrets":
+		data, err = fetchSecretsForExport(application, k8sClient, ctx, namespace)
+	case "resources":
+		data, err = fetchResourcesForExport(application, k8sClient, ctx, namespace, clusterID)
+	case "pvpvc":
+		data, err = fetchPVPVCForExport(application, k8sClient, ctx, namespace, clusterID)
+	case "crds":
+		data, err = fetchCRDsForExport(application, k8sClient, ctx, clusterID)
+	case "health":
+		data, err = fetchHealthForExport(application, k8sClient, ctx, namespace, clusterID)
 		default:
 			http.Error(w, "unsupported resource type", http.StatusBadRequest)
 			return
@@ -111,13 +118,13 @@ func getExport(application *app.App) http.HandlerFunc {
 	}
 }
 
-func fetchPodsForExport(app *app.App, ctx context.Context, namespace string) ([]map[string]interface{}, error) {
-	cacheKey := fmt.Sprintf("pods:%s", namespace)
+func fetchPodsForExport(app *app.App, k8sClient *k8s.Client, ctx context.Context, namespace string, clusterID string) ([]map[string]interface{}, error) {
+	cacheKey := fmt.Sprintf("%s:export:pods:%s", clusterID, namespace)
 	if cached, ok := app.Cache.Get(cacheKey); ok {
 		return cached.([]map[string]interface{}), nil
 	}
 
-	pods, err := app.K8sClient.Clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{})
+	pods, err := k8sClient.Clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -149,21 +156,21 @@ func fetchPodsForExport(app *app.App, ctx context.Context, namespace string) ([]
 	return result, nil
 }
 
-func fetchServicesForExport(app *app.App, ctx context.Context, namespace string) (interface{}, error) {
-	services, err := k8s.ListServices(ctx, app.K8sClient.Clientset, namespace)
+func fetchServicesForExport(app *app.App, k8sClient *k8s.Client, ctx context.Context, namespace string) (interface{}, error) {
+	services, err := k8s.ListServices(ctx, k8sClient.Clientset, namespace)
 	if err != nil {
 		return nil, err
 	}
 	return services, nil
 }
 
-func fetchDeploymentsForExport(app *app.App, ctx context.Context, namespace string) ([]map[string]interface{}, error) {
-	cacheKey := fmt.Sprintf("deployments:%s", namespace)
+func fetchDeploymentsForExport(app *app.App, k8sClient *k8s.Client, ctx context.Context, namespace string, clusterID string) ([]map[string]interface{}, error) {
+	cacheKey := fmt.Sprintf("%s:export:deployments:%s", clusterID, namespace)
 	if cached, ok := app.Cache.Get(cacheKey); ok {
 		return cached.([]map[string]interface{}), nil
 	}
 
-	deployments, err := app.K8sClient.Clientset.AppsV1().Deployments(namespace).List(ctx, metav1.ListOptions{})
+	deployments, err := k8sClient.Clientset.AppsV1().Deployments(namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -191,8 +198,8 @@ func fetchDeploymentsForExport(app *app.App, ctx context.Context, namespace stri
 	return result, nil
 }
 
-func fetchIngressesForExport(app *app.App, ctx context.Context, namespace string) ([]map[string]interface{}, error) {
-	ingresses, err := app.K8sClient.Clientset.NetworkingV1().Ingresses(namespace).List(ctx, metav1.ListOptions{})
+func fetchIngressesForExport(app *app.App, k8sClient *k8s.Client, ctx context.Context, namespace string) ([]map[string]interface{}, error) {
+	ingresses, err := k8sClient.Clientset.NetworkingV1().Ingresses(namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -225,8 +232,8 @@ func fetchIngressesForExport(app *app.App, ctx context.Context, namespace string
 	return result, nil
 }
 
-func fetchConfigMapsForExport(app *app.App, ctx context.Context, namespace string) ([]map[string]interface{}, error) {
-	cms, err := app.K8sClient.Clientset.CoreV1().ConfigMaps(namespace).List(ctx, metav1.ListOptions{})
+func fetchConfigMapsForExport(app *app.App, k8sClient *k8s.Client, ctx context.Context, namespace string) ([]map[string]interface{}, error) {
+	cms, err := k8sClient.Clientset.CoreV1().ConfigMaps(namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -251,8 +258,8 @@ func fetchConfigMapsForExport(app *app.App, ctx context.Context, namespace strin
 	return result, nil
 }
 
-func fetchSecretsForExport(app *app.App, ctx context.Context, namespace string) ([]map[string]interface{}, error) {
-	secrets, err := app.K8sClient.Clientset.CoreV1().Secrets(namespace).List(ctx, metav1.ListOptions{})
+func fetchSecretsForExport(app *app.App, k8sClient *k8s.Client, ctx context.Context, namespace string) ([]map[string]interface{}, error) {
+	secrets, err := k8sClient.Clientset.CoreV1().Secrets(namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -275,36 +282,36 @@ func fetchSecretsForExport(app *app.App, ctx context.Context, namespace string) 
 	return result, nil
 }
 
-func fetchResourcesForExport(app *app.App, ctx context.Context, namespace string) (map[string]interface{}, error) {
-	cacheKey := fmt.Sprintf("resources:%s:all:false", namespace)
+func fetchResourcesForExport(app *app.App, k8sClient *k8s.Client, ctx context.Context, namespace string, clusterID string) (map[string]interface{}, error) {
+	cacheKey := fmt.Sprintf("%s:export:resources:%s:all:false", clusterID, namespace)
 	if cached, ok := app.Cache.Get(cacheKey); ok {
 		return cached.(map[string]interface{}), nil
 	}
 
 	// Build minimal resources list via getAllResources logic
 	resources := []map[string]interface{}{}
-	pods, _ := app.K8sClient.Clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{})
+	pods, _ := k8sClient.Clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{})
 	for _, pod := range pods.Items {
 		resources = append(resources, map[string]interface{}{
 			"name": pod.Name, "namespace": pod.Namespace, "resource_type": "Pod",
 			"status": string(pod.Status.Phase), "health_score": calculatePodHealth(&pod),
 		})
 	}
-	deps, _ := app.K8sClient.Clientset.AppsV1().Deployments(namespace).List(ctx, metav1.ListOptions{})
+	deps, _ := k8sClient.Clientset.AppsV1().Deployments(namespace).List(ctx, metav1.ListOptions{})
 	for _, d := range deps.Items {
 		resources = append(resources, map[string]interface{}{
 			"name": d.Name, "namespace": d.Namespace, "resource_type": "Deployment",
 			"status": getDeploymentStatus(&d), "health_score": calculateDeploymentHealth(&d),
 		})
 	}
-	svcs, _ := app.K8sClient.Clientset.CoreV1().Services(namespace).List(ctx, metav1.ListOptions{})
+	svcs, _ := k8sClient.Clientset.CoreV1().Services(namespace).List(ctx, metav1.ListOptions{})
 	for _, s := range svcs.Items {
 		resources = append(resources, map[string]interface{}{
 			"name": s.Name, "namespace": s.Namespace, "resource_type": "Service",
 			"status": "Active", "health_score": 100,
 		})
 	}
-	ings, _ := app.K8sClient.Clientset.NetworkingV1().Ingresses(namespace).List(ctx, metav1.ListOptions{})
+	ings, _ := k8sClient.Clientset.NetworkingV1().Ingresses(namespace).List(ctx, metav1.ListOptions{})
 	for _, i := range ings.Items {
 		resources = append(resources, map[string]interface{}{
 			"name": i.Name, "namespace": i.Namespace, "resource_type": "Ingress",
@@ -319,13 +326,13 @@ func fetchResourcesForExport(app *app.App, ctx context.Context, namespace string
 	}, nil
 }
 
-func fetchPVPVCForExport(app *app.App, ctx context.Context, namespace string) (map[string]interface{}, error) {
-	cacheKey := fmt.Sprintf("pvpvc:%s", namespace)
+func fetchPVPVCForExport(app *app.App, k8sClient *k8s.Client, ctx context.Context, namespace string, clusterID string) (map[string]interface{}, error) {
+	cacheKey := fmt.Sprintf("%s:export:pvpvc:%s", clusterID, namespace)
 	if cached, ok := app.Cache.Get(cacheKey); ok {
 		return cached.(map[string]interface{}), nil
 	}
 
-	pvcList, err := app.K8sClient.Clientset.CoreV1().PersistentVolumeClaims(namespace).List(ctx, metav1.ListOptions{})
+	pvcList, err := k8sClient.Clientset.CoreV1().PersistentVolumeClaims(namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -356,13 +363,13 @@ func fetchPVPVCForExport(app *app.App, ctx context.Context, namespace string) (m
 	}, nil
 }
 
-func fetchCRDsForExport(app *app.App, ctx context.Context) ([]map[string]interface{}, error) {
-	cacheKey := "crds:cluster"
+func fetchCRDsForExport(app *app.App, k8sClient *k8s.Client, ctx context.Context, clusterID string) ([]map[string]interface{}, error) {
+	cacheKey := fmt.Sprintf("%s:export:crds:cluster", clusterID)
 	if cached, ok := app.Cache.Get(cacheKey); ok {
 		return cached.([]map[string]interface{}), nil
 	}
 
-	apiExt, err := apiextensionsclientset.NewForConfig(app.K8sClient.Config)
+	apiExt, err := apiextensionsclientset.NewForConfig(k8sClient.Config)
 	if err != nil {
 		return nil, err
 	}
@@ -389,17 +396,17 @@ func fetchCRDsForExport(app *app.App, ctx context.Context) ([]map[string]interfa
 	return result, nil
 }
 
-func fetchHealthForExport(app *app.App, ctx context.Context, namespace string) (map[string]interface{}, error) {
-	cacheKey := fmt.Sprintf("health:%s", namespace)
+func fetchHealthForExport(app *app.App, k8sClient *k8s.Client, ctx context.Context, namespace string, clusterID string) (map[string]interface{}, error) {
+	cacheKey := fmt.Sprintf("%s:export:health:%s", clusterID, namespace)
 	if cached, ok := app.Cache.Get(cacheKey); ok {
 		return cached.(map[string]interface{}), nil
 	}
 	// Trigger a health fetch by calling getHealth logic - we need the response
 	// Simpler: make a minimal fetch for export
-	pods, _ := app.K8sClient.Clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{})
-	deps, _ := app.K8sClient.Clientset.AppsV1().Deployments(namespace).List(ctx, metav1.ListOptions{})
-	svcs, _ := app.K8sClient.Clientset.CoreV1().Services(namespace).List(ctx, metav1.ListOptions{})
-	ings, _ := app.K8sClient.Clientset.NetworkingV1().Ingresses(namespace).List(ctx, metav1.ListOptions{})
+	pods, _ := k8sClient.Clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{})
+	deps, _ := k8sClient.Clientset.AppsV1().Deployments(namespace).List(ctx, metav1.ListOptions{})
+	svcs, _ := k8sClient.Clientset.CoreV1().Services(namespace).List(ctx, metav1.ListOptions{})
+	ings, _ := k8sClient.Clientset.NetworkingV1().Ingresses(namespace).List(ctx, metav1.ListOptions{})
 
 	healthyPods, degradedPods, criticalPods := 0, 0, 0
 	for _, pod := range pods.Items {

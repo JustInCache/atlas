@@ -24,8 +24,18 @@ func readinessCheck(application *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
-		// Check K8s connection
-		_, err := application.K8sClient.Clientset.Discovery().ServerVersion()
+		k8sClient, err := getK8sClient(application, r)
+		if err != nil {
+			application.Logger.Error("Readiness check failed - no k8s client", "error", err)
+			w.WriteHeader(http.StatusServiceUnavailable)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"status": "not_ready",
+				"error":  err.Error(),
+			})
+			return
+		}
+
+		_, err = k8sClient.Clientset.Discovery().ServerVersion()
 		if err != nil {
 			application.Logger.Error("Readiness check failed", "error", err)
 			w.WriteHeader(http.StatusServiceUnavailable)

@@ -68,6 +68,7 @@ type Config struct {
 	RedisAddr     string
 	RedisPassword string
 	RedisDB       int
+	RedisTLS      bool
 
 	// ClusterID is used as namespace prefix for Redis keys
 	ClusterID string

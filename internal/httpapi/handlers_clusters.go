@@ -27,7 +27,13 @@ func getClusterInfo(application *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
-		namespaces, err := application.K8sClient.Clientset.CoreV1().Namespaces().List(r.Context(), metav1.ListOptions{})
+		k8sClient, err := getK8sClient(application, r)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to get k8s client: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		namespaces, err := k8sClient.Clientset.CoreV1().Namespaces().List(r.Context(), metav1.ListOptions{})
 		if err != nil {
 			application.Logger.Error("Failed to list namespaces", "error", err)
 			http.Error(w, "Failed to retrieve cluster information", http.StatusInternalServerError)
@@ -283,32 +289,54 @@ func getCacheStatsHandler(app *app.App) http.HandlerFunc {
 
 // getUserID extracts user ID from request.
 // When deployed behind OAuth2 Proxy (Azure AD), trusts forwarded headers.
-// Priority: OAuth2 Proxy headers > Session cookie > Generate session
+// Priority: OAuth2 Proxy headers > Session cookie (set by sessionMiddleware)
 func getUserID(r *http.Request) string {
 	// 1. Check OAuth2 Proxy headers (from Azure AD) - TRUSTED source
-	// These headers are only set when user is authenticated via Azure AD
 	if email := r.Header.Get("X-Forwarded-Email"); email != "" {
-		return email // e.g., user@company.com
+		return email
 	}
 	if user := r.Header.Get("X-Forwarded-User"); user != "" {
 		return user
 	}
 
-	// 2. Check existing session cookie (fallback for direct access in dev)
+	// 2. Session cookie — always present thanks to sessionMiddleware
 	if cookie, err := r.Cookie("atlas_session"); err == nil && cookie.Value != "" {
 		return cookie.Value
 	}
 
-	// 3. Generate new session ID (shouldn't happen with OAuth2 Proxy)
-	return generateSessionID()
+	// 3. Fallback (should not happen if middleware is wired correctly)
+	return "anonymous"
 }
 
-// Only OAuth2 Proxy headers (X-Forwarded-Email, X-Forwarded-User) are trusted.
-// generateSessionID creates a cryptographically secure random session ID
+// sessionMiddleware ensures every browser has a stable session cookie.
+// Without this, getUserID would generate a new random ID per request,
+// breaking cluster switching (the switch is stored against a user ID
+// that subsequent requests would never see again).
+func sessionMiddleware() mux.MiddlewareFunc {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if _, err := r.Cookie("atlas_session"); err != nil {
+				id := generateSessionID()
+				http.SetCookie(w, &http.Cookie{
+					Name:     "atlas_session",
+					Value:    id,
+					Path:     "/",
+					MaxAge:   86400 * 30, // 30 days
+					HttpOnly: true,
+					SameSite: http.SameSiteLaxMode,
+				})
+				// Also set on the request so handlers in this same
+				// round-trip see the cookie immediately.
+				r.AddCookie(&http.Cookie{Name: "atlas_session", Value: id})
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 func generateSessionID() string {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
-		// Fallback to timestamp-based ID
 		return fmt.Sprintf("session_%d", time.Now().UnixNano())
 	}
 	return hex.EncodeToString(b)

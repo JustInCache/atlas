@@ -52,6 +52,7 @@ func main() {
 		RedisAddr:     cfg.Cache.Redis.Addr,
 		RedisPassword: cfg.Cache.Redis.Password,
 		RedisDB:       cfg.Cache.Redis.DB,
+		RedisTLS:      cfg.Cache.Redis.TLS,
 		ClusterID:     getFirstClusterID(cfg),
 		EnableMetrics: true,
 	}

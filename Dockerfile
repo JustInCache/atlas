@@ -26,8 +26,9 @@ FROM alpine:3.19
 
 WORKDIR /app
 
-# Install ca-certificates for HTTPS and kubectl communication
-RUN apk add --no-cache ca-certificates
+# Install ca-certificates, wget (ECS healthcheck), and AWS CLI (EKS kubeconfig exec auth)
+RUN apk add --no-cache ca-certificates wget python3 py3-pip \
+    && pip3 install --break-system-packages --no-cache-dir awscli
 
 # Copy binary from builder
 COPY --from=builder /app/bin/atlas /app/atlas
@@ -35,8 +36,15 @@ COPY --from=builder /app/bin/atlas /app/atlas
 # Copy UI static files
 COPY --from=builder /app/ui /app/ui
 
-# Create non-root user and pre-create .kube dir with correct ownership
-RUN adduser -D -u 1000 appuser && mkdir -p /home/appuser/.kube
+COPY entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+
+# Create non-root user before copying kubeconfigs so we can set ownership
+RUN adduser -D -u 1000 appuser \
+  && mkdir -p /home/appuser/.kube /app/kubeconfigs
+
+# Copy kubeconfig files and make them writable by appuser (entrypoint may overwrite from env vars)
+COPY --chown=appuser:appuser kubeconfigs/ /app/kubeconfigs/
 USER appuser
 
 # Expose port
@@ -45,5 +53,4 @@ EXPOSE 8080
 # Set default environment variables
 ENV PORT=8080
 
-# Run the application
-ENTRYPOINT ["/app/atlas"]
+ENTRYPOINT ["/app/entrypoint.sh"]

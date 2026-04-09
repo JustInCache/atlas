@@ -21,14 +21,20 @@ func getStatefulSets(application *app.App) http.HandlerFunc {
 		namespace := resolveNamespace(vars["namespace"])
 		ctx := r.Context()
 
-		// Check cache first
-		cacheKey := fmt.Sprintf("statefulsets:%s", namespace)
+		k8sClient, err := getK8sClient(application, r)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to get k8s client: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		clusterID := getClusterID(application, r)
+		cacheKey := fmt.Sprintf("%s:statefulsets:%s", clusterID, namespace)
 		if cached, ok := application.Cache.Get(cacheKey); ok {
 			json.NewEncoder(w).Encode(cached)
 			return
 		}
 
-		statefulSets, err := application.K8sClient.Clientset.AppsV1().StatefulSets(namespace).List(ctx, metav1.ListOptions{})
+		statefulSets, err := k8sClient.Clientset.AppsV1().StatefulSets(namespace).List(ctx, metav1.ListOptions{})
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -73,14 +79,20 @@ func getDaemonSets(application *app.App) http.HandlerFunc {
 		namespace := resolveNamespace(vars["namespace"])
 		ctx := r.Context()
 
-		// Check cache first
-		cacheKey := fmt.Sprintf("daemonsets:%s", namespace)
+		k8sClient, err := getK8sClient(application, r)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to get k8s client: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		clusterID := getClusterID(application, r)
+		cacheKey := fmt.Sprintf("%s:daemonsets:%s", clusterID, namespace)
 		if cached, ok := application.Cache.Get(cacheKey); ok {
 			json.NewEncoder(w).Encode(cached)
 			return
 		}
 
-		daemonSets, err := application.K8sClient.Clientset.AppsV1().DaemonSets(namespace).List(ctx, metav1.ListOptions{})
+		daemonSets, err := k8sClient.Clientset.AppsV1().DaemonSets(namespace).List(ctx, metav1.ListOptions{})
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -121,14 +133,20 @@ func getJobs(application *app.App) http.HandlerFunc {
 		namespace := resolveNamespace(vars["namespace"])
 		ctx := r.Context()
 
-		// Check cache first
-		cacheKey := fmt.Sprintf("jobs:%s", namespace)
+		k8sClient, err := getK8sClient(application, r)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to get k8s client: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		clusterID := getClusterID(application, r)
+		cacheKey := fmt.Sprintf("%s:jobs:%s", clusterID, namespace)
 		if cached, ok := application.Cache.Get(cacheKey); ok {
 			json.NewEncoder(w).Encode(cached)
 			return
 		}
 
-		jobs, err := application.K8sClient.Clientset.BatchV1().Jobs(namespace).List(ctx, metav1.ListOptions{})
+		jobs, err := k8sClient.Clientset.BatchV1().Jobs(namespace).List(ctx, metav1.ListOptions{})
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -199,15 +217,21 @@ func getEndpoints(application *app.App) http.HandlerFunc {
 		namespace := resolveNamespace(vars["namespace"])
 		ctx := r.Context()
 
-		// Check cache first
-		cacheKey := fmt.Sprintf("endpoints:%s", namespace)
+		k8sClient, err := getK8sClient(application, r)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to get k8s client: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		clusterID := getClusterID(application, r)
+		cacheKey := fmt.Sprintf("%s:endpoints:%s", clusterID, namespace)
 		if cached, ok := application.Cache.Get(cacheKey); ok {
 			json.NewEncoder(w).Encode(cached)
 			return
 		}
 
 		// Use EndpointSlices (modern API) instead of deprecated Endpoints
-		endpointSlices, err := application.K8sClient.Clientset.DiscoveryV1().EndpointSlices(namespace).List(ctx, metav1.ListOptions{})
+		endpointSlices, err := k8sClient.Clientset.DiscoveryV1().EndpointSlices(namespace).List(ctx, metav1.ListOptions{})
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -277,7 +301,13 @@ func getStorageClasses(application *app.App) http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 		ctx := r.Context()
 
-		storageClasses, err := application.K8sClient.Clientset.StorageV1().StorageClasses().List(ctx, metav1.ListOptions{})
+		k8sClient, err := getK8sClient(application, r)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to get k8s client: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		storageClasses, err := k8sClient.Clientset.StorageV1().StorageClasses().List(ctx, metav1.ListOptions{})
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -336,7 +366,13 @@ func getHPAs(application *app.App) http.HandlerFunc {
 		namespace := resolveNamespace(vars["namespace"])
 		ctx := r.Context()
 
-		hpas, err := application.K8sClient.Clientset.AutoscalingV2().HorizontalPodAutoscalers(namespace).List(ctx, metav1.ListOptions{})
+		k8sClient, err := getK8sClient(application, r)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to get k8s client: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		hpas, err := k8sClient.Clientset.AutoscalingV2().HorizontalPodAutoscalers(namespace).List(ctx, metav1.ListOptions{})
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -424,7 +460,13 @@ func getPDBs(application *app.App) http.HandlerFunc {
 		namespace := resolveNamespace(vars["namespace"])
 		ctx := r.Context()
 
-		pdbs, err := application.K8sClient.Clientset.PolicyV1().PodDisruptionBudgets(namespace).List(ctx, metav1.ListOptions{})
+		k8sClient, err := getK8sClient(application, r)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to get k8s client: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		pdbs, err := k8sClient.Clientset.PolicyV1().PodDisruptionBudgets(namespace).List(ctx, metav1.ListOptions{})
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return

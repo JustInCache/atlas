@@ -1,0 +1,29 @@
+apiVersion: v1
+clusters:
+- cluster:
+    certificate-authority-data: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSURCVENDQWUyZ0F3SUJBZ0lJYktMQWJPeUcxV1l3RFFZSktvWklodmNOQVFFTEJRQXdGVEVUTUJFR0ExVUUKQXhNS2EzVmlaWEp1WlhSbGN6QWVGdzB5TkRBMk1EWXlNVFU1TWpoYUZ3MHpOREEyTURReU1qQTBNamhhTUJVeApFekFSQmdOVkJBTVRDbXQxWW1WeWJtVjBaWE13Z2dFaU1BMEdDU3FHU0liM0RRRUJBUVVBQTRJQkR3QXdnZ0VLCkFvSUJBUURYUjVLSFFsSmFMZElVb0gzbXA0bkdaU0JnaWlOdSt6TkMySUc1NUp5ZFA0cHdWUlJEY0ZJaDR2T0sKeXlBRzFhVHZFQUJRMFJaTlVIdHdTcGM5RWsySktLNXNDb0lCUnRlazIxcndFMys1NTNadHptWWFCQnV6aGtYNwpqbVhsRHdGNDlJRHRwemxDdkdETFhyZTlaZlkyd3UwZmF2SkdoSjJXT3ljWS8rc200dGQ3TlZGODhML3kzUWVLCmNXQWQ5Q0RDMTJTbE4wa21IODVZb0ZqSzFEM081YVFzaEp0QmxEeUNnK1Jaak9NNldsZkR0ejVZQ3kxazhuUlMKRkl2ZTg5TVR2bzFnWVNQUEcwOUxad2VSOU04RFZtT2EzV3Izb2UybkEzcm9xZWxVSS9HelJNY3B3WGFrSG56cwpXNmRhQlY1MUduNHBjOWRzMlk4bXdNaVdoalRaQWdNQkFBR2pXVEJYTUE0R0ExVWREd0VCL3dRRUF3SUNwREFQCkJnTlZIUk1CQWY4RUJUQURBUUgvTUIwR0ExVWREZ1FXQkJRZkxQM216MzhWdW8xN1p4eDNLd1BhcUQzWDl6QVYKQmdOVkhSRUVEakFNZ2dwcmRXSmxjbTVsZEdWek1BMEdDU3FHU0liM0RRRUJDd1VBQTRJQkFRQ2VWTWxrWVFqKworbyt3N24weVNSMnVCaDJwaURieVNnK3N1TitOSlNUU0J2clRaME5GL0xydXo1anJ1MmhoMjZSS1ZtdE1vZlRICjBGd1ZIU3ZYVlRMaWVoNldjUWtPR0VxOWdkVUZZTXFENEt4OWpOajUvTTh5VjhsTEhjOHpKT1ZNamlRQ29VQW0KRHpIY2ErbVlyRVRsclRjNEVFSStDNitOSXFhMUpJaGZTUS9jdkVOT01wTEJ2TE53MWtOSlJ0RFdYTUZGWGIyNwp1bGU4dlJSbzl1N2wrS0NFSGRCZHpGMkRuWktkODY0c09Fd3o2SkhzUWJSbE1JMlBYRGYrRnlnRzV6M0FNZ0xuClZJTUxnTFZpdHYrdTdmSVRHdXUzcVc5azliZjU4Szc4Q2Z5dXZadnZSZDBLSnQvM24waXZiZDRiMnFEMzgvNnUKbWFIZTBwa1Zhdy9ECi0tLS0tRU5EIENFUlRJRklDQVRFLS0tLS0K
+    server: https://F12E980CFD9C64B0D85A7C85FE5973D2.gr7.us-west-2.eks.amazonaws.com
+  name: arn:aws:eks:us-west-2:676894657875:cluster/qa11-msvin
+contexts:
+- context:
+    cluster: arn:aws:eks:us-west-2:676894657875:cluster/qa11-msvin
+    user: arn:aws:eks:us-west-2:676894657875:cluster/qa11-msvin
+  name: arn:aws:eks:us-west-2:676894657875:cluster/qa11-msvin
+current-context: arn:aws:eks:us-west-2:676894657875:cluster/qa11-msvin
+kind: Config
+preferences: {}
+users:
+- name: arn:aws:eks:us-west-2:676894657875:cluster/qa11-msvin
+  user:
+    exec:
+      apiVersion: client.authentication.k8s.io/v1beta1
+      args:
+      - --region
+      - us-west-2
+      - eks
+      - get-token
+      - --cluster-name
+      - qa11-msvin
+      - --output
+      - json
+      command: aws

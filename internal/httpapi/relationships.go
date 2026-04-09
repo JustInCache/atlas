@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"atlas/internal/app"
+	"atlas/internal/k8s"
 
 	"encoding/json"
 
@@ -23,23 +24,29 @@ func getResourceRelationships(application *app.App) http.HandlerFunc {
 		namespace := vars["namespace"]
 		ctx := r.Context()
 
-		// Add caching for relationships endpoint
-		cacheKey := fmt.Sprintf("relationships:%s", namespace)
+		k8sClient, err := getK8sClient(application, r)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to get k8s client: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		clusterID := getClusterID(application, r)
+		cacheKey := fmt.Sprintf("%s:relationships:%s", clusterID, namespace)
 		if cached, ok := application.Cache.Get(cacheKey); ok {
 			json.NewEncoder(w).Encode(cached)
 			return
 		}
 
 		relationships := map[string]interface{}{
-			"deployments_to_pods":   buildDeploymentToPodMap(application, ctx, namespace),
-			"services_to_pods":      buildServiceToPodMap(application, ctx, namespace),
-			"ingresses_to_services": buildIngressToServiceMap(application, ctx, namespace),
-			"pvcs_to_pods":          buildPVCToPodMap(application, ctx, namespace),
-			"configmaps_to_pods":    buildConfigMapToPodMap(application, ctx, namespace),
-			"secrets_to_pods":       buildSecretToPodMap(application, ctx, namespace),
-			"pods_to_nodes":         buildPodToNodeMap(application, ctx, namespace),
-			"orphaned_resources":    findOrphanedResources(application, ctx, namespace),
-			"service_dependencies":  buildServiceDependencies(application, ctx, namespace),
+			"deployments_to_pods":   buildDeploymentToPodMap(application, k8sClient, ctx, namespace),
+			"services_to_pods":      buildServiceToPodMap(application, k8sClient, ctx, namespace),
+			"ingresses_to_services": buildIngressToServiceMap(application, k8sClient, ctx, namespace),
+			"pvcs_to_pods":          buildPVCToPodMap(application, k8sClient, ctx, namespace),
+			"configmaps_to_pods":    buildConfigMapToPodMap(application, k8sClient, ctx, namespace),
+			"secrets_to_pods":       buildSecretToPodMap(application, k8sClient, ctx, namespace),
+			"pods_to_nodes":         buildPodToNodeMap(application, k8sClient, ctx, namespace),
+			"orphaned_resources":    findOrphanedResources(application, k8sClient, ctx, namespace),
+			"service_dependencies":  buildServiceDependencies(application, k8sClient, ctx, namespace),
 		}
 
 		// Cache for 30 seconds
@@ -49,16 +56,16 @@ func getResourceRelationships(application *app.App) http.HandlerFunc {
 	}
 }
 
-func buildDeploymentToPodMap(application *app.App, ctx context.Context, namespace string) []map[string]interface{} {
+func buildDeploymentToPodMap(application *app.App, k8sClient *k8s.Client, ctx context.Context, namespace string) []map[string]interface{} {
 	results := []map[string]interface{}{}
 
-	deployments, err := application.K8sClient.Clientset.AppsV1().Deployments(namespace).List(ctx, metav1.ListOptions{})
+	deployments, err := k8sClient.Clientset.AppsV1().Deployments(namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return results
 	}
 
 	for _, dep := range deployments.Items {
-		pods, _ := application.K8sClient.Clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
+		pods, _ := k8sClient.Clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
 			LabelSelector: metav1.FormatLabelSelector(dep.Spec.Selector),
 		})
 
@@ -89,10 +96,10 @@ func buildDeploymentToPodMap(application *app.App, ctx context.Context, namespac
 	return results
 }
 
-func buildServiceToPodMap(application *app.App, ctx context.Context, namespace string) []map[string]interface{} {
+func buildServiceToPodMap(application *app.App, k8sClient *k8s.Client, ctx context.Context, namespace string) []map[string]interface{} {
 	results := []map[string]interface{}{}
 
-	services, err := application.K8sClient.Clientset.CoreV1().Services(namespace).List(ctx, metav1.ListOptions{})
+	services, err := k8sClient.Clientset.CoreV1().Services(namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return results
 	}
@@ -105,7 +112,7 @@ func buildServiceToPodMap(application *app.App, ctx context.Context, namespace s
 		podList := []map[string]interface{}{}
 		if svc.Spec.Selector != nil {
 			selector := labels.Set(svc.Spec.Selector).AsSelector()
-			pods, _ := application.K8sClient.Clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
+			pods, _ := k8sClient.Clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
 				LabelSelector: selector.String(),
 			})
 
@@ -121,7 +128,7 @@ func buildServiceToPodMap(application *app.App, ctx context.Context, namespace s
 		// Get endpoints info using EndpointSlices
 		endpointCount := 0
 		labelSelector := fmt.Sprintf("kubernetes.io/service-name=%s", svc.Name)
-		endpointSlices, _ := application.K8sClient.Clientset.DiscoveryV1().EndpointSlices(namespace).List(ctx, metav1.ListOptions{
+		endpointSlices, _ := k8sClient.Clientset.DiscoveryV1().EndpointSlices(namespace).List(ctx, metav1.ListOptions{
 			LabelSelector: labelSelector,
 		})
 		if endpointSlices != nil {
@@ -148,10 +155,10 @@ func buildServiceToPodMap(application *app.App, ctx context.Context, namespace s
 	return results
 }
 
-func buildIngressToServiceMap(application *app.App, ctx context.Context, namespace string) []map[string]interface{} {
+func buildIngressToServiceMap(application *app.App, k8sClient *k8s.Client, ctx context.Context, namespace string) []map[string]interface{} {
 	results := []map[string]interface{}{}
 
-	ingresses, err := application.K8sClient.Clientset.NetworkingV1().Ingresses(namespace).List(ctx, metav1.ListOptions{})
+	ingresses, err := k8sClient.Clientset.NetworkingV1().Ingresses(namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return results
 	}
@@ -173,7 +180,7 @@ func buildIngressToServiceMap(application *app.App, ctx context.Context, namespa
 
 		services := []map[string]interface{}{}
 		for svcName, paths := range serviceMap {
-			svc, _ := application.K8sClient.Clientset.CoreV1().Services(namespace).Get(ctx, svcName, metav1.GetOptions{})
+			svc, _ := k8sClient.Clientset.CoreV1().Services(namespace).Get(ctx, svcName, metav1.GetOptions{})
 			svcInfo := map[string]interface{}{
 				"name":  svcName,
 				"paths": paths,
@@ -194,16 +201,16 @@ func buildIngressToServiceMap(application *app.App, ctx context.Context, namespa
 	return results
 }
 
-func buildPVCToPodMap(application *app.App, ctx context.Context, namespace string) []map[string]interface{} {
+func buildPVCToPodMap(application *app.App, k8sClient *k8s.Client, ctx context.Context, namespace string) []map[string]interface{} {
 	results := []map[string]interface{}{}
 
-	pvcs, err := application.K8sClient.Clientset.CoreV1().PersistentVolumeClaims(namespace).List(ctx, metav1.ListOptions{})
+	pvcs, err := k8sClient.Clientset.CoreV1().PersistentVolumeClaims(namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return results
 	}
 
 	for _, pvc := range pvcs.Items {
-		pods, _ := application.K8sClient.Clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{})
+		pods, _ := k8sClient.Clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{})
 
 		podList := []map[string]interface{}{}
 		for _, pod := range pods.Items {
@@ -238,15 +245,15 @@ func buildPVCToPodMap(application *app.App, ctx context.Context, namespace strin
 	return results
 }
 
-func buildConfigMapToPodMap(application *app.App, ctx context.Context, namespace string) []map[string]interface{} {
+func buildConfigMapToPodMap(application *app.App, k8sClient *k8s.Client, ctx context.Context, namespace string) []map[string]interface{} {
 	results := []map[string]interface{}{}
 
-	configMaps, err := application.K8sClient.Clientset.CoreV1().ConfigMaps(namespace).List(ctx, metav1.ListOptions{})
+	configMaps, err := k8sClient.Clientset.CoreV1().ConfigMaps(namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return results
 	}
 
-	pods, _ := application.K8sClient.Clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{})
+	pods, _ := k8sClient.Clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{})
 
 	for _, cm := range configMaps.Items {
 		podList := []map[string]interface{}{}
@@ -298,15 +305,15 @@ func buildConfigMapToPodMap(application *app.App, ctx context.Context, namespace
 	return results
 }
 
-func buildSecretToPodMap(application *app.App, ctx context.Context, namespace string) []map[string]interface{} {
+func buildSecretToPodMap(application *app.App, k8sClient *k8s.Client, ctx context.Context, namespace string) []map[string]interface{} {
 	results := []map[string]interface{}{}
 
-	secrets, err := application.K8sClient.Clientset.CoreV1().Secrets(namespace).List(ctx, metav1.ListOptions{})
+	secrets, err := k8sClient.Clientset.CoreV1().Secrets(namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return results
 	}
 
-	pods, _ := application.K8sClient.Clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{})
+	pods, _ := k8sClient.Clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{})
 
 	for _, secret := range secrets.Items {
 		// Skip service account tokens
@@ -364,10 +371,10 @@ func buildSecretToPodMap(application *app.App, ctx context.Context, namespace st
 	return results
 }
 
-func buildPodToNodeMap(application *app.App, ctx context.Context, namespace string) []map[string]interface{} {
+func buildPodToNodeMap(application *app.App, k8sClient *k8s.Client, ctx context.Context, namespace string) []map[string]interface{} {
 	results := []map[string]interface{}{}
 
-	pods, err := application.K8sClient.Clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{})
+	pods, err := k8sClient.Clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return results
 	}
@@ -404,7 +411,7 @@ func buildPodToNodeMap(application *app.App, ctx context.Context, namespace stri
 	return results
 }
 
-func findOrphanedResources(application *app.App, ctx context.Context, namespace string) map[string]interface{} {
+func findOrphanedResources(application *app.App, k8sClient *k8s.Client, ctx context.Context, namespace string) map[string]interface{} {
 	orphaned := map[string]interface{}{
 		"pvcs":       []string{},
 		"configmaps": []string{},
@@ -412,10 +419,10 @@ func findOrphanedResources(application *app.App, ctx context.Context, namespace 
 		"services":   []string{},
 	}
 
-	pods, _ := application.K8sClient.Clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{})
+	pods, _ := k8sClient.Clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{})
 
 	// Find unused PVCs
-	pvcs, _ := application.K8sClient.Clientset.CoreV1().PersistentVolumeClaims(namespace).List(ctx, metav1.ListOptions{})
+	pvcs, _ := k8sClient.Clientset.CoreV1().PersistentVolumeClaims(namespace).List(ctx, metav1.ListOptions{})
 	for _, pvc := range pvcs.Items {
 		used := false
 		for _, pod := range pods.Items {
@@ -437,7 +444,7 @@ func findOrphanedResources(application *app.App, ctx context.Context, namespace 
 	}
 
 	// Find unused ConfigMaps
-	configMaps, _ := application.K8sClient.Clientset.CoreV1().ConfigMaps(namespace).List(ctx, metav1.ListOptions{})
+	configMaps, _ := k8sClient.Clientset.CoreV1().ConfigMaps(namespace).List(ctx, metav1.ListOptions{})
 	for _, cm := range configMaps.Items {
 		used := false
 		for _, pod := range pods.Items {
@@ -469,7 +476,7 @@ func findOrphanedResources(application *app.App, ctx context.Context, namespace 
 	}
 
 	// Find services without endpoints
-	services, _ := application.K8sClient.Clientset.CoreV1().Services(namespace).List(ctx, metav1.ListOptions{})
+	services, _ := k8sClient.Clientset.CoreV1().Services(namespace).List(ctx, metav1.ListOptions{})
 	for _, svc := range services.Items {
 		if svc.Spec.Type == "ExternalName" {
 			continue
@@ -477,7 +484,7 @@ func findOrphanedResources(application *app.App, ctx context.Context, namespace 
 
 		// Use EndpointSlices to check for endpoints
 		labelSelector := fmt.Sprintf("kubernetes.io/service-name=%s", svc.Name)
-		endpointSlices, _ := application.K8sClient.Clientset.DiscoveryV1().EndpointSlices(namespace).List(ctx, metav1.ListOptions{
+		endpointSlices, _ := k8sClient.Clientset.DiscoveryV1().EndpointSlices(namespace).List(ctx, metav1.ListOptions{
 			LabelSelector: labelSelector,
 		})
 		hasEndpoints := false
@@ -505,17 +512,17 @@ func findOrphanedResources(application *app.App, ctx context.Context, namespace 
 	return orphaned
 }
 
-func buildServiceDependencies(application *app.App, ctx context.Context, namespace string) []map[string]interface{} {
+func buildServiceDependencies(application *app.App, k8sClient *k8s.Client, ctx context.Context, namespace string) []map[string]interface{} {
 	results := []map[string]interface{}{}
 
 	// Get all services
-	services, err := application.K8sClient.Clientset.CoreV1().Services(namespace).List(ctx, metav1.ListOptions{})
+	services, err := k8sClient.Clientset.CoreV1().Services(namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return results
 	}
 
 	// Get all pods to check their dependencies
-	pods, _ := application.K8sClient.Clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{})
+	pods, _ := k8sClient.Clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{})
 
 	for _, svc := range services.Items {
 		dependencies := []string{}

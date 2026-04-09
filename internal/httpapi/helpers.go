@@ -22,31 +22,41 @@ import (
 )
 
 // getK8sClient returns the appropriate k8s client for the request.
-// In single-cluster mode, returns the app's single client.
 // In multi-cluster mode, gets the client for the user's selected cluster.
+// Falls back to single-cluster mode if ClusterManager is not configured.
 func getK8sClient(application *app.App, r *http.Request) (*k8s.Client, error) {
-	// Single cluster mode
+	// Multi-cluster mode takes priority
+	if application.ClusterManager != nil {
+		userID := getUserID(r)
+		clusterID, ok := application.ClusterManager.GetUserCluster(userID)
+		if !ok {
+			clusterID = application.ClusterManager.GetDefaultCluster()
+		}
+		if clusterID != "" {
+			return application.ClusterManager.GetCluster(clusterID)
+		}
+	}
+
+	// Single cluster mode fallback
 	if application.K8sClient != nil {
 		return application.K8sClient, nil
 	}
 
-	// Multi-cluster mode
-	if application.ClusterManager == nil {
-		return nil, fmt.Errorf("no k8s client available")
-	}
+	return nil, fmt.Errorf("no k8s client available")
+}
 
-	// Get the user's selected cluster
-	userID := getUserID(r)
-	clusterID, ok := application.ClusterManager.GetUserCluster(userID)
-	if !ok {
-		clusterID = application.ClusterManager.GetDefaultCluster()
+// getClusterID returns the active cluster ID for the current request.
+// Used to namespace cache keys in multi-cluster mode.
+func getClusterID(application *app.App, r *http.Request) string {
+	if application.ClusterManager != nil {
+		userID := getUserID(r)
+		clusterID, ok := application.ClusterManager.GetUserCluster(userID)
+		if !ok {
+			clusterID = application.ClusterManager.GetDefaultCluster()
+		}
+		return clusterID
 	}
-
-	if clusterID == "" {
-		return nil, fmt.Errorf("no cluster selected")
-	}
-
-	return application.ClusterManager.GetCluster(clusterID)
+	return ""
 }
 
 // resolveNamespace returns the namespace as-is.
@@ -497,7 +507,7 @@ func buildPodDetails(pod *corev1.Pod, application *app.App, ctx context.Context)
 	}
 }
 
-func buildDeploymentDetails(dep *appsv1.Deployment, application *app.App, ctx context.Context) map[string]interface{} {
+func buildDeploymentDetails(dep *appsv1.Deployment, application *app.App, k8sClient *k8s.Client, ctx context.Context) map[string]interface{} {
 	// Extract container information
 	containers := []map[string]interface{}{}
 	for _, c := range dep.Spec.Template.Spec.Containers {
@@ -592,11 +602,11 @@ func buildDeploymentDetails(dep *appsv1.Deployment, application *app.App, ctx co
 		"status":        getDeploymentStatus(dep),
 		"health_score":  calculateDeploymentHealth(dep),
 		"details":       details,
-		"relationships": buildDeploymentRelationships(dep, application, ctx),
+		"relationships": buildDeploymentRelationships(dep, application, k8sClient, ctx),
 	}
 }
 
-func buildServiceDetails(svc *corev1.Service, application *app.App, ctx context.Context) map[string]interface{} {
+func buildServiceDetails(svc *corev1.Service, application *app.App, k8sClient *k8s.Client, ctx context.Context) map[string]interface{} {
 	ports := []map[string]interface{}{}
 	for _, p := range svc.Spec.Ports {
 		ports = append(ports, map[string]interface{}{
@@ -611,7 +621,7 @@ func buildServiceDetails(svc *corev1.Service, application *app.App, ctx context.
 	// Use EndpointSlices instead of deprecated Endpoints
 	endpointCount := 0
 	labelSelector := fmt.Sprintf("kubernetes.io/service-name=%s", svc.Name)
-	endpointSlices, _ := application.K8sClient.Clientset.DiscoveryV1().EndpointSlices(svc.Namespace).List(ctx, metav1.ListOptions{
+	endpointSlices, _ := k8sClient.Clientset.DiscoveryV1().EndpointSlices(svc.Namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: labelSelector,
 	})
 	if endpointSlices != nil {
@@ -643,11 +653,11 @@ func buildServiceDetails(svc *corev1.Service, application *app.App, ctx context.
 		"status":        "Active",
 		"health_score":  100,
 		"details":       details,
-		"relationships": buildServiceRelationships(svc, application, ctx),
+		"relationships": buildServiceRelationships(svc, application, k8sClient, ctx),
 	}
 }
 
-func buildIngressDetails(ing *networkingv1.Ingress, application *app.App, ctx context.Context) map[string]interface{} {
+func buildIngressDetails(ing *networkingv1.Ingress, application *app.App, k8sClient *k8s.Client, ctx context.Context) map[string]interface{} {
 	hosts := []string{}
 	backends := []string{}
 	rules := []map[string]interface{}{}
@@ -708,7 +718,7 @@ func buildIngressDetails(ing *networkingv1.Ingress, application *app.App, ctx co
 		"status":        "Active",
 		"health_score":  100,
 		"details":       details,
-		"relationships": buildIngressRelationships(ing, application, ctx),
+		"relationships": buildIngressRelationships(ing, application, k8sClient, ctx),
 	}
 }
 
@@ -815,11 +825,11 @@ func buildPodRelationships(pod *corev1.Pod, application *app.App, ctx context.Co
 	return relationships
 }
 
-func buildDeploymentRelationships(dep *appsv1.Deployment, application *app.App, ctx context.Context) []map[string]interface{} {
+func buildDeploymentRelationships(dep *appsv1.Deployment, application *app.App, k8sClient *k8s.Client, ctx context.Context) []map[string]interface{} {
 	relationships := []map[string]interface{}{}
 
 	// Pods managed by this deployment
-	pods, _ := application.K8sClient.Clientset.CoreV1().Pods(dep.Namespace).List(ctx, metav1.ListOptions{
+	pods, _ := k8sClient.Clientset.CoreV1().Pods(dep.Namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: metav1.FormatLabelSelector(dep.Spec.Selector),
 	})
 	for _, pod := range pods.Items {
@@ -874,7 +884,7 @@ func buildDeploymentRelationships(dep *appsv1.Deployment, application *app.App, 
 	return relationships
 }
 
-func buildServiceRelationships(svc *corev1.Service, application *app.App, ctx context.Context) []map[string]interface{} {
+func buildServiceRelationships(svc *corev1.Service, application *app.App, k8sClient *k8s.Client, ctx context.Context) []map[string]interface{} {
 	relationships := []map[string]interface{}{}
 
 	// Deployments that this service routes to (top-down)
@@ -882,7 +892,7 @@ func buildServiceRelationships(svc *corev1.Service, application *app.App, ctx co
 		selector := labels.Set(svc.Spec.Selector).AsSelector()
 
 		// Find deployments that match the service selector
-		deployments, _ := application.K8sClient.Clientset.AppsV1().Deployments(svc.Namespace).List(ctx, metav1.ListOptions{})
+		deployments, _ := k8sClient.Clientset.AppsV1().Deployments(svc.Namespace).List(ctx, metav1.ListOptions{})
 		for _, dep := range deployments.Items {
 			if selector.Matches(labels.Set(dep.Spec.Template.Labels)) {
 				relationships = append(relationships, map[string]interface{}{
@@ -901,7 +911,7 @@ func buildServiceRelationships(svc *corev1.Service, application *app.App, ctx co
 		}
 
 		// Find StatefulSets that match the service selector
-		statefulsets, _ := application.K8sClient.Clientset.AppsV1().StatefulSets(svc.Namespace).List(ctx, metav1.ListOptions{})
+		statefulsets, _ := k8sClient.Clientset.AppsV1().StatefulSets(svc.Namespace).List(ctx, metav1.ListOptions{})
 		for _, sts := range statefulsets.Items {
 			if selector.Matches(labels.Set(sts.Spec.Template.Labels)) {
 				relationships = append(relationships, map[string]interface{}{
@@ -920,7 +930,7 @@ func buildServiceRelationships(svc *corev1.Service, application *app.App, ctx co
 
 		// If no deployments/statefulsets found, show pods directly
 		if len(relationships) == 0 {
-			pods, _ := application.K8sClient.Clientset.CoreV1().Pods(svc.Namespace).List(ctx, metav1.ListOptions{
+			pods, _ := k8sClient.Clientset.CoreV1().Pods(svc.Namespace).List(ctx, metav1.ListOptions{
 				LabelSelector: selector.String(),
 			})
 			for _, pod := range pods.Items {
@@ -944,7 +954,7 @@ func buildServiceRelationships(svc *corev1.Service, application *app.App, ctx co
 	return relationships
 }
 
-func buildIngressRelationships(ing *networkingv1.Ingress, application *app.App, ctx context.Context) []map[string]interface{} {
+func buildIngressRelationships(ing *networkingv1.Ingress, application *app.App, k8sClient *k8s.Client, ctx context.Context) []map[string]interface{} {
 	relationships := []map[string]interface{}{}
 
 	// Use a map to deduplicate services and collect their paths
@@ -967,7 +977,7 @@ func buildIngressRelationships(ing *networkingv1.Ingress, application *app.App, 
 
 	// Create one relationship per unique service with all its paths
 	for serviceName, paths := range serviceMap {
-		svc, _ := application.K8sClient.Clientset.CoreV1().Services(ing.Namespace).Get(ctx, serviceName, metav1.GetOptions{})
+		svc, _ := k8sClient.Clientset.CoreV1().Services(ing.Namespace).Get(ctx, serviceName, metav1.GetOptions{})
 
 		details := map[string]interface{}{
 			"paths": paths,
@@ -991,7 +1001,7 @@ func buildIngressRelationships(ing *networkingv1.Ingress, application *app.App, 
 	return relationships
 }
 
-func buildStatefulSetDetails(sts *appsv1.StatefulSet, application *app.App, ctx context.Context) map[string]interface{} {
+func buildStatefulSetDetails(sts *appsv1.StatefulSet, application *app.App, k8sClient *k8s.Client, ctx context.Context) map[string]interface{} {
 	desired := int32(0)
 	if sts.Spec.Replicas != nil {
 		desired = *sts.Spec.Replicas
@@ -1015,11 +1025,11 @@ func buildStatefulSetDetails(sts *appsv1.StatefulSet, application *app.App, ctx 
 			"service_name":     sts.Spec.ServiceName,
 			"update_strategy":  string(sts.Spec.UpdateStrategy.Type),
 		},
-		"relationships": buildStatefulSetRelationships(sts, application, ctx),
+		"relationships": buildStatefulSetRelationships(sts, application, k8sClient, ctx),
 	}
 }
 
-func buildDaemonSetDetails(ds *appsv1.DaemonSet, application *app.App, ctx context.Context) map[string]interface{} {
+func buildDaemonSetDetails(ds *appsv1.DaemonSet, application *app.App, k8sClient *k8s.Client, ctx context.Context) map[string]interface{} {
 	health := 100
 	if ds.Status.DesiredNumberScheduled > 0 {
 		health = int((ds.Status.NumberReady * 100) / ds.Status.DesiredNumberScheduled)
@@ -1038,11 +1048,11 @@ func buildDaemonSetDetails(ds *appsv1.DaemonSet, application *app.App, ctx conte
 			"available":         ds.Status.NumberAvailable,
 			"update_strategy":   string(ds.Spec.UpdateStrategy.Type),
 		},
-		"relationships": buildDaemonSetRelationships(ds, application, ctx),
+		"relationships": buildDaemonSetRelationships(ds, application, k8sClient, ctx),
 	}
 }
 
-func buildJobDetails(job *batchv1.Job, application *app.App, ctx context.Context) map[string]interface{} {
+func buildJobDetails(job *batchv1.Job, application *app.App, k8sClient *k8s.Client, ctx context.Context) map[string]interface{} {
 	status := "Running"
 	health := 50
 	if job.Status.Succeeded > 0 {
@@ -1066,11 +1076,11 @@ func buildJobDetails(job *batchv1.Job, application *app.App, ctx context.Context
 			"failed":      job.Status.Failed,
 			"active":      job.Status.Active,
 		},
-		"relationships": buildJobRelationships(job, application, ctx),
+		"relationships": buildJobRelationships(job, application, k8sClient, ctx),
 	}
 }
 
-func buildCronJobDetails(cj *batchv1.CronJob, application *app.App, ctx context.Context) map[string]interface{} {
+func buildCronJobDetails(cj *batchv1.CronJob, application *app.App, k8sClient *k8s.Client, ctx context.Context) map[string]interface{} {
 	status := "Active"
 	health := 100
 	if cj.Spec.Suspend != nil && *cj.Spec.Suspend {
@@ -1091,7 +1101,7 @@ func buildCronJobDetails(cj *batchv1.CronJob, application *app.App, ctx context.
 			"active_jobs":        len(cj.Status.Active),
 			"concurrency_policy": string(cj.Spec.ConcurrencyPolicy),
 		},
-		"relationships": buildCronJobRelationships(cj, application, ctx),
+		"relationships": buildCronJobRelationships(cj, application, k8sClient, ctx),
 	}
 }
 
@@ -1113,13 +1123,13 @@ func getDaemonSetStatus(ds *appsv1.DaemonSet) string {
 	return "Degraded"
 }
 
-func buildStatefulSetRelationships(sts *appsv1.StatefulSet, application *app.App, ctx context.Context) []map[string]interface{} {
+func buildStatefulSetRelationships(sts *appsv1.StatefulSet, application *app.App, k8sClient *k8s.Client, ctx context.Context) []map[string]interface{} {
 	relationships := []map[string]interface{}{}
 
 	// Find pods managed by this StatefulSet
 	if sts.Spec.Selector != nil {
 		selector := labels.SelectorFromSet(sts.Spec.Selector.MatchLabels)
-		pods, _ := application.K8sClient.Clientset.CoreV1().Pods(sts.Namespace).List(ctx, metav1.ListOptions{
+		pods, _ := k8sClient.Clientset.CoreV1().Pods(sts.Namespace).List(ctx, metav1.ListOptions{
 			LabelSelector: selector.String(),
 		})
 
@@ -1136,13 +1146,13 @@ func buildStatefulSetRelationships(sts *appsv1.StatefulSet, application *app.App
 	return relationships
 }
 
-func buildDaemonSetRelationships(ds *appsv1.DaemonSet, application *app.App, ctx context.Context) []map[string]interface{} {
+func buildDaemonSetRelationships(ds *appsv1.DaemonSet, application *app.App, k8sClient *k8s.Client, ctx context.Context) []map[string]interface{} {
 	relationships := []map[string]interface{}{}
 
 	// Find pods managed by this DaemonSet
 	if ds.Spec.Selector != nil {
 		selector := labels.SelectorFromSet(ds.Spec.Selector.MatchLabels)
-		pods, _ := application.K8sClient.Clientset.CoreV1().Pods(ds.Namespace).List(ctx, metav1.ListOptions{
+		pods, _ := k8sClient.Clientset.CoreV1().Pods(ds.Namespace).List(ctx, metav1.ListOptions{
 			LabelSelector: selector.String(),
 		})
 
@@ -1159,7 +1169,7 @@ func buildDaemonSetRelationships(ds *appsv1.DaemonSet, application *app.App, ctx
 	return relationships
 }
 
-func buildJobRelationships(job *batchv1.Job, application *app.App, ctx context.Context) []map[string]interface{} {
+func buildJobRelationships(job *batchv1.Job, application *app.App, k8sClient *k8s.Client, ctx context.Context) []map[string]interface{} {
 	relationships := []map[string]interface{}{}
 
 	// Check if this job is owned by a CronJob
@@ -1179,7 +1189,7 @@ func buildJobRelationships(job *batchv1.Job, application *app.App, ctx context.C
 	// Find pods created by this Job
 	if job.Spec.Selector != nil {
 		selector := labels.SelectorFromSet(job.Spec.Selector.MatchLabels)
-		pods, _ := application.K8sClient.Clientset.CoreV1().Pods(job.Namespace).List(ctx, metav1.ListOptions{
+		pods, _ := k8sClient.Clientset.CoreV1().Pods(job.Namespace).List(ctx, metav1.ListOptions{
 			LabelSelector: selector.String(),
 		})
 
@@ -1236,11 +1246,11 @@ func buildJobRelationships(job *batchv1.Job, application *app.App, ctx context.C
 	return relationships
 }
 
-func buildCronJobRelationships(cj *batchv1.CronJob, application *app.App, ctx context.Context) []map[string]interface{} {
+func buildCronJobRelationships(cj *batchv1.CronJob, application *app.App, k8sClient *k8s.Client, ctx context.Context) []map[string]interface{} {
 	relationships := []map[string]interface{}{}
 
 	// Find ALL jobs created by this CronJob (not just active ones)
-	jobs, _ := application.K8sClient.Clientset.BatchV1().Jobs(cj.Namespace).List(ctx, metav1.ListOptions{})
+	jobs, _ := k8sClient.Clientset.BatchV1().Jobs(cj.Namespace).List(ctx, metav1.ListOptions{})
 	for _, job := range jobs.Items {
 		// Check if this job is owned by the CronJob
 		for _, owner := range job.OwnerReferences {
@@ -1274,11 +1284,11 @@ func buildCronJobRelationships(cj *batchv1.CronJob, application *app.App, ctx co
 	return relationships
 }
 
-func buildConfigMapRelationships(cm *corev1.ConfigMap, application *app.App, ctx context.Context) []map[string]interface{} {
+func buildConfigMapRelationships(cm *corev1.ConfigMap, application *app.App, k8sClient *k8s.Client, ctx context.Context) []map[string]interface{} {
 	relationships := []map[string]interface{}{}
 
 	// Find pods that use this ConfigMap (bottom-up)
-	pods, _ := application.K8sClient.Clientset.CoreV1().Pods(cm.Namespace).List(ctx, metav1.ListOptions{})
+	pods, _ := k8sClient.Clientset.CoreV1().Pods(cm.Namespace).List(ctx, metav1.ListOptions{})
 
 	for _, pod := range pods.Items {
 		usageType := ""
@@ -1325,7 +1335,7 @@ func buildConfigMapRelationships(cm *corev1.ConfigMap, application *app.App, ctx
 	return relationships
 }
 
-func buildSecretRelationships(secret *corev1.Secret, application *app.App, ctx context.Context) []map[string]interface{} {
+func buildSecretRelationships(secret *corev1.Secret, application *app.App, k8sClient *k8s.Client, ctx context.Context) []map[string]interface{} {
 	relationships := []map[string]interface{}{}
 
 	// Skip service account tokens
@@ -1334,7 +1344,7 @@ func buildSecretRelationships(secret *corev1.Secret, application *app.App, ctx c
 	}
 
 	// Find pods that use this Secret (bottom-up)
-	pods, _ := application.K8sClient.Clientset.CoreV1().Pods(secret.Namespace).List(ctx, metav1.ListOptions{})
+	pods, _ := k8sClient.Clientset.CoreV1().Pods(secret.Namespace).List(ctx, metav1.ListOptions{})
 
 	for _, pod := range pods.Items {
 		usageType := ""
@@ -1381,12 +1391,12 @@ func buildSecretRelationships(secret *corev1.Secret, application *app.App, ctx c
 	return relationships
 }
 
-func buildPVCRelationships(pvc *corev1.PersistentVolumeClaim, application *app.App, ctx context.Context) []map[string]interface{} {
+func buildPVCRelationships(pvc *corev1.PersistentVolumeClaim, application *app.App, k8sClient *k8s.Client, ctx context.Context) []map[string]interface{} {
 	relationships := []map[string]interface{}{}
 
 	// Add PersistentVolume relationship if bound
 	if pvc.Spec.VolumeName != "" {
-		pv, err := application.K8sClient.Clientset.CoreV1().PersistentVolumes().Get(ctx, pvc.Spec.VolumeName, metav1.GetOptions{})
+		pv, err := k8sClient.Clientset.CoreV1().PersistentVolumes().Get(ctx, pvc.Spec.VolumeName, metav1.GetOptions{})
 		if err == nil {
 			pvDetails := map[string]interface{}{
 				"reclaim_policy": string(pv.Spec.PersistentVolumeReclaimPolicy),
@@ -1411,7 +1421,7 @@ func buildPVCRelationships(pvc *corev1.PersistentVolumeClaim, application *app.A
 	}
 
 	// Find pods that use this PVC (bottom-up)
-	pods, _ := application.K8sClient.Clientset.CoreV1().Pods(pvc.Namespace).List(ctx, metav1.ListOptions{})
+	pods, _ := k8sClient.Clientset.CoreV1().Pods(pvc.Namespace).List(ctx, metav1.ListOptions{})
 
 	for _, pod := range pods.Items {
 		for _, vol := range pod.Spec.Volumes {
@@ -1435,7 +1445,7 @@ func buildPVCRelationships(pvc *corev1.PersistentVolumeClaim, application *app.A
 	}
 
 	// Find Deployments/StatefulSets using this PVC
-	deployments, _ := application.K8sClient.Clientset.AppsV1().Deployments(pvc.Namespace).List(ctx, metav1.ListOptions{})
+	deployments, _ := k8sClient.Clientset.AppsV1().Deployments(pvc.Namespace).List(ctx, metav1.ListOptions{})
 	for _, deploy := range deployments.Items {
 		for _, vol := range deploy.Spec.Template.Spec.Volumes {
 			if vol.PersistentVolumeClaim != nil && vol.PersistentVolumeClaim.ClaimName == pvc.Name {
@@ -1452,7 +1462,7 @@ func buildPVCRelationships(pvc *corev1.PersistentVolumeClaim, application *app.A
 		}
 	}
 
-	statefulsets, _ := application.K8sClient.Clientset.AppsV1().StatefulSets(pvc.Namespace).List(ctx, metav1.ListOptions{})
+	statefulsets, _ := k8sClient.Clientset.AppsV1().StatefulSets(pvc.Namespace).List(ctx, metav1.ListOptions{})
 	for _, sts := range statefulsets.Items {
 		for _, vol := range sts.Spec.Template.Spec.Volumes {
 			if vol.PersistentVolumeClaim != nil && vol.PersistentVolumeClaim.ClaimName == pvc.Name {
@@ -1472,7 +1482,7 @@ func buildPVCRelationships(pvc *corev1.PersistentVolumeClaim, application *app.A
 	return relationships
 }
 
-func buildConfigMapDetails(cm *corev1.ConfigMap, application *app.App, ctx context.Context) map[string]interface{} {
+func buildConfigMapDetails(cm *corev1.ConfigMap, application *app.App, k8sClient *k8s.Client, ctx context.Context) map[string]interface{} {
 	details := map[string]interface{}{
 		"keys":       len(cm.Data),
 		"data_keys":  getMapKeys(cm.Data),
@@ -1487,11 +1497,11 @@ func buildConfigMapDetails(cm *corev1.ConfigMap, application *app.App, ctx conte
 		"status":        "Active",
 		"health_score":  100,
 		"details":       details,
-		"relationships": buildConfigMapRelationships(cm, application, ctx),
+		"relationships": buildConfigMapRelationships(cm, application, k8sClient, ctx),
 	}
 }
 
-func buildSecretDetails(secret *corev1.Secret, application *app.App, ctx context.Context) map[string]interface{} {
+func buildSecretDetails(secret *corev1.Secret, application *app.App, k8sClient *k8s.Client, ctx context.Context) map[string]interface{} {
 	details := map[string]interface{}{
 		"type":       string(secret.Type),
 		"keys":       len(secret.Data),
@@ -1507,11 +1517,11 @@ func buildSecretDetails(secret *corev1.Secret, application *app.App, ctx context
 		"status":        "Active",
 		"health_score":  100,
 		"details":       details,
-		"relationships": buildSecretRelationships(secret, application, ctx),
+		"relationships": buildSecretRelationships(secret, application, k8sClient, ctx),
 	}
 }
 
-func buildPVCDetails(pvc *corev1.PersistentVolumeClaim, application *app.App, ctx context.Context) map[string]interface{} {
+func buildPVCDetails(pvc *corev1.PersistentVolumeClaim, application *app.App, k8sClient *k8s.Client, ctx context.Context) map[string]interface{} {
 	// Access modes
 	accessModes := []string{}
 	for _, mode := range pvc.Spec.AccessModes {
@@ -1538,7 +1548,7 @@ func buildPVCDetails(pvc *corev1.PersistentVolumeClaim, application *app.App, ct
 	// Fetch full PV details when bound
 	var pvDetails map[string]interface{}
 	if pvc.Spec.VolumeName != "" {
-		pv, err := application.K8sClient.Clientset.CoreV1().PersistentVolumes().Get(ctx, pvc.Spec.VolumeName, metav1.GetOptions{})
+		pv, err := k8sClient.Clientset.CoreV1().PersistentVolumes().Get(ctx, pvc.Spec.VolumeName, metav1.GetOptions{})
 		if err == nil {
 			pvCapacity := ""
 			if capacity, ok := pv.Spec.Capacity["storage"]; ok {
@@ -1611,7 +1621,7 @@ func buildPVCDetails(pvc *corev1.PersistentVolumeClaim, application *app.App, ct
 	// Fetch pods using this PVC
 	usingPods := []string{}
 	podDetails := []map[string]interface{}{}
-	pods, _ := application.K8sClient.Clientset.CoreV1().Pods(pvc.Namespace).List(ctx, metav1.ListOptions{})
+	pods, _ := k8sClient.Clientset.CoreV1().Pods(pvc.Namespace).List(ctx, metav1.ListOptions{})
 	for _, pod := range pods.Items {
 		for _, vol := range pod.Spec.Volumes {
 			if vol.PersistentVolumeClaim != nil && vol.PersistentVolumeClaim.ClaimName == pvc.Name {
@@ -1662,7 +1672,7 @@ func buildPVCDetails(pvc *corev1.PersistentVolumeClaim, application *app.App, ct
 		"annotations":       pvc.Annotations,
 		"created_at":        pvc.CreationTimestamp.Format(time.RFC3339),
 		"age_days":          int(time.Since(pvc.CreationTimestamp.Time).Hours() / 24),
-		"relationships":     buildPVCRelationships(pvc, application, ctx),
+		"relationships":     buildPVCRelationships(pvc, application, k8sClient, ctx),
 	}
 }
 
@@ -1769,7 +1779,7 @@ func buildEndpointsDetails(ep *corev1.Endpoints, application *app.App, ctx conte
 	}
 }
 
-func buildStorageClassDetails(sc *storagev1.StorageClass, application *app.App, ctx context.Context) map[string]interface{} {
+func buildStorageClassDetails(sc *storagev1.StorageClass, application *app.App, k8sClient *k8s.Client, ctx context.Context) map[string]interface{} {
 	isDefault := false
 	if sc.Annotations != nil {
 		if val, ok := sc.Annotations["storageclass.kubernetes.io/is-default-class"]; ok && val == "true" {
@@ -1795,7 +1805,7 @@ func buildStorageClassDetails(sc *storagev1.StorageClass, application *app.App, 
 	}
 
 	// Find PVCs using this StorageClass
-	allPVCs, _ := application.K8sClient.Clientset.CoreV1().PersistentVolumeClaims("").List(ctx, metav1.ListOptions{})
+	allPVCs, _ := k8sClient.Clientset.CoreV1().PersistentVolumeClaims("").List(ctx, metav1.ListOptions{})
 	usingPVCs := []map[string]interface{}{}
 	for _, pvc := range allPVCs.Items {
 		if pvc.Spec.StorageClassName != nil && *pvc.Spec.StorageClassName == sc.Name {

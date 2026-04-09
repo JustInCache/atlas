@@ -33,15 +33,15 @@ func loggingMiddleware(logger *slog.Logger) mux.MiddlewareFunc {
 func SetupRoutes(application *app.App) *mux.Router {
 	r := mux.NewRouter()
 	// Add logging middleware
+	r.Use(sessionMiddleware())
 	r.Use(loggingMiddleware(application.Logger))
-	// Limits: 100 requests/minute per IP, burst of 20
 	r.Use(rateLimitMiddleware())
 	// Serve static files
 	r.PathPrefix("/static/").Handler(http.StripPrefix("/static/", http.FileServer(http.Dir("./ui"))))
 	r.HandleFunc("/", serveIndex)
 	// Health check endpoints
-	r.HandleFunc("/healthz", healthCheck(application)).Methods("GET")
-	r.HandleFunc("/readyz", readinessCheck(application)).Methods("GET")
+	r.HandleFunc("/healthz", healthCheck(application)).Methods("GET", "HEAD")
+	r.HandleFunc("/readyz", readinessCheck(application)).Methods("GET", "HEAD")
 
 	// API routes
 	r.HandleFunc("/api/cluster", getClusterInfo(application)).Methods("GET")

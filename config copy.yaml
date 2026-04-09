@@ -1,0 +1,27 @@
+# Atlas Production Configuration - AWS EKS
+# This configuration is designed for multi-cluster EKS deployments
+
+# Server configuration
+server:
+  port: 8080
+
+# Cache configuration - Redis recommended for production
+cache:
+  type: redis
+  redis:
+    addr: "redis:6379"
+    password: "Amdocs@123"  # Set via REDIS_PASSWORD env var
+    db: 0
+
+# Feature flags
+features:
+  multi_cluster: true
+
+# Clusters
+clusters:
+  - id: central
+    name: "Local Cluster"
+    kubeconfig: ~/.kube/config
+    api_server: https://EE0F2B0766331879E87ACC986A4BE37C.yl4.us-west-2.eks.amazonaws.com
+    region: us-west-2
+

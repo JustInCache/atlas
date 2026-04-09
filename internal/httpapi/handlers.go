@@ -35,7 +35,8 @@ func getAllResources(application *app.App) http.HandlerFunc {
 		resourceType := r.URL.Query().Get("resource_type")
 		lightweight := r.URL.Query().Get("lightweight") == "true"
 
-		cacheKey := fmt.Sprintf("resources:%s:%s:%v", namespace, resourceType, lightweight)
+		clusterID := getClusterID(application, r)
+		cacheKey := fmt.Sprintf("%s:resources:%s:%s:%v", clusterID, namespace, resourceType, lightweight)
 		ctx := r.Context()
 
 		// Check if we have cached version
@@ -390,7 +391,7 @@ func getAllResources(application *app.App) http.HandlerFunc {
 		// Get current ResourceVersion from one of the lists
 		currentVersion := ""
 		if resourceType == "" || resourceType == "all" || resourceType == "Pod" {
-			if podsList, err := application.K8sClient.Clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{Limit: 1}); err == nil {
+			if podsList, err := k8sClient.Clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{Limit: 1}); err == nil {
 				currentVersion = podsList.ResourceVersion
 			}
 		}
@@ -417,8 +418,14 @@ func getResourceDetails(application *app.App) http.HandlerFunc {
 		namespace := resolveNamespace(vars["namespace"])
 		name := vars["name"]
 
-		// Cache key for resource details (15 second TTL - details change less frequently than lists)
-		cacheKey := fmt.Sprintf("resource-details:%s:%s:%s", resourceType, namespace, name)
+		k8sClient, err := getK8sClient(application, r)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to get k8s client: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		clusterID := getClusterID(application, r)
+		cacheKey := fmt.Sprintf("%s:resource-details:%s:%s:%s", clusterID, resourceType, namespace, name)
 		if cached, ok := application.Cache.Get(cacheKey); ok {
 			json.NewEncoder(w).Encode(cached)
 			return
@@ -429,105 +436,105 @@ func getResourceDetails(application *app.App) http.HandlerFunc {
 
 		switch resourceType {
 		case "Pod":
-			pod, err := application.K8sClient.Clientset.CoreV1().Pods(namespace).Get(ctx, name, metav1.GetOptions{})
+			pod, err := k8sClient.Clientset.CoreV1().Pods(namespace).Get(ctx, name, metav1.GetOptions{})
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusNotFound)
 				return
 			}
 			details = buildPodDetails(pod, application, ctx)
 		case "Deployment":
-			dep, err := application.K8sClient.Clientset.AppsV1().Deployments(namespace).Get(ctx, name, metav1.GetOptions{})
+			dep, err := k8sClient.Clientset.AppsV1().Deployments(namespace).Get(ctx, name, metav1.GetOptions{})
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusNotFound)
 				return
 			}
-			details = buildDeploymentDetails(dep, application, ctx)
+			details = buildDeploymentDetails(dep, application, k8sClient, ctx)
 		case "Service":
-			svc, err := application.K8sClient.Clientset.CoreV1().Services(namespace).Get(ctx, name, metav1.GetOptions{})
+			svc, err := k8sClient.Clientset.CoreV1().Services(namespace).Get(ctx, name, metav1.GetOptions{})
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusNotFound)
 				return
 			}
-			details = buildServiceDetails(svc, application, ctx)
+			details = buildServiceDetails(svc, application, k8sClient, ctx)
 		case "Ingress":
-			ing, err := application.K8sClient.Clientset.NetworkingV1().Ingresses(namespace).Get(ctx, name, metav1.GetOptions{})
+			ing, err := k8sClient.Clientset.NetworkingV1().Ingresses(namespace).Get(ctx, name, metav1.GetOptions{})
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusNotFound)
 				return
 			}
-			details = buildIngressDetails(ing, application, ctx)
+			details = buildIngressDetails(ing, application, k8sClient, ctx)
 		case "StatefulSet":
-			sts, err := application.K8sClient.Clientset.AppsV1().StatefulSets(namespace).Get(ctx, name, metav1.GetOptions{})
+			sts, err := k8sClient.Clientset.AppsV1().StatefulSets(namespace).Get(ctx, name, metav1.GetOptions{})
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusNotFound)
 				return
 			}
-			details = buildStatefulSetDetails(sts, application, ctx)
+			details = buildStatefulSetDetails(sts, application, k8sClient, ctx)
 		case "DaemonSet":
-			ds, err := application.K8sClient.Clientset.AppsV1().DaemonSets(namespace).Get(ctx, name, metav1.GetOptions{})
+			ds, err := k8sClient.Clientset.AppsV1().DaemonSets(namespace).Get(ctx, name, metav1.GetOptions{})
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusNotFound)
 				return
 			}
-			details = buildDaemonSetDetails(ds, application, ctx)
+			details = buildDaemonSetDetails(ds, application, k8sClient, ctx)
 		case "Job":
-			job, err := application.K8sClient.Clientset.BatchV1().Jobs(namespace).Get(ctx, name, metav1.GetOptions{})
+			job, err := k8sClient.Clientset.BatchV1().Jobs(namespace).Get(ctx, name, metav1.GetOptions{})
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusNotFound)
 				return
 			}
-			details = buildJobDetails(job, application, ctx)
+			details = buildJobDetails(job, application, k8sClient, ctx)
 		case "CronJob":
-			cj, err := application.K8sClient.Clientset.BatchV1().CronJobs(namespace).Get(ctx, name, metav1.GetOptions{})
+			cj, err := k8sClient.Clientset.BatchV1().CronJobs(namespace).Get(ctx, name, metav1.GetOptions{})
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusNotFound)
 				return
 			}
-			details = buildCronJobDetails(cj, application, ctx)
+			details = buildCronJobDetails(cj, application, k8sClient, ctx)
 		case "ConfigMap":
-			cm, err := application.K8sClient.Clientset.CoreV1().ConfigMaps(namespace).Get(ctx, name, metav1.GetOptions{})
+			cm, err := k8sClient.Clientset.CoreV1().ConfigMaps(namespace).Get(ctx, name, metav1.GetOptions{})
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusNotFound)
 				return
 			}
-			details = buildConfigMapDetails(cm, application, ctx)
+			details = buildConfigMapDetails(cm, application, k8sClient, ctx)
 		case "Secret":
-			secret, err := application.K8sClient.Clientset.CoreV1().Secrets(namespace).Get(ctx, name, metav1.GetOptions{})
+			secret, err := k8sClient.Clientset.CoreV1().Secrets(namespace).Get(ctx, name, metav1.GetOptions{})
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusNotFound)
 				return
 			}
-			details = buildSecretDetails(secret, application, ctx)
+			details = buildSecretDetails(secret, application, k8sClient, ctx)
 		case "PersistentVolumeClaim":
-			pvc, err := application.K8sClient.Clientset.CoreV1().PersistentVolumeClaims(namespace).Get(ctx, name, metav1.GetOptions{})
+			pvc, err := k8sClient.Clientset.CoreV1().PersistentVolumeClaims(namespace).Get(ctx, name, metav1.GetOptions{})
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusNotFound)
 				return
 			}
-			details = buildPVCDetails(pvc, application, ctx)
+			details = buildPVCDetails(pvc, application, k8sClient, ctx)
 		case "Endpoints":
-			ep, err := application.K8sClient.Clientset.CoreV1().Endpoints(namespace).Get(ctx, name, metav1.GetOptions{})
+			ep, err := k8sClient.Clientset.CoreV1().Endpoints(namespace).Get(ctx, name, metav1.GetOptions{})
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusNotFound)
 				return
 			}
 			details = buildEndpointsDetails(ep, application, ctx)
 		case "StorageClass":
-			sc, err := application.K8sClient.Clientset.StorageV1().StorageClasses().Get(ctx, name, metav1.GetOptions{})
+			sc, err := k8sClient.Clientset.StorageV1().StorageClasses().Get(ctx, name, metav1.GetOptions{})
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusNotFound)
 				return
 			}
-			details = buildStorageClassDetails(sc, application, ctx)
+			details = buildStorageClassDetails(sc, application, k8sClient, ctx)
 		case "HorizontalPodAutoscaler":
-			hpa, err := application.K8sClient.Clientset.AutoscalingV2().HorizontalPodAutoscalers(namespace).Get(ctx, name, metav1.GetOptions{})
+			hpa, err := k8sClient.Clientset.AutoscalingV2().HorizontalPodAutoscalers(namespace).Get(ctx, name, metav1.GetOptions{})
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusNotFound)
 				return
 			}
 			details = buildHPADetails(hpa, application, ctx)
 		case "PodDisruptionBudget":
-			pdb, err := application.K8sClient.Clientset.PolicyV1().PodDisruptionBudgets(namespace).Get(ctx, name, metav1.GetOptions{})
+			pdb, err := k8sClient.Clientset.PolicyV1().PodDisruptionBudgets(namespace).Get(ctx, name, metav1.GetOptions{})
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusNotFound)
 				return
@@ -551,14 +558,20 @@ func getIngresses(application *app.App) http.HandlerFunc {
 		vars := mux.Vars(r)
 		namespace := resolveNamespace(vars["namespace"])
 
-		// Check cache first
-		cacheKey := fmt.Sprintf("ingresses:%s", namespace)
+		k8sClient, err := getK8sClient(application, r)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to get k8s client: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		clusterID := getClusterID(application, r)
+		cacheKey := fmt.Sprintf("%s:ingresses:%s", clusterID, namespace)
 		if cached, ok := application.Cache.Get(cacheKey); ok {
 			json.NewEncoder(w).Encode(cached)
 			return
 		}
 
-		ingresses, err := application.K8sClient.Clientset.NetworkingV1().Ingresses(namespace).List(r.Context(), metav1.ListOptions{})
+		ingresses, err := k8sClient.Clientset.NetworkingV1().Ingresses(namespace).List(r.Context(), metav1.ListOptions{})
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -661,6 +674,12 @@ func getServices(application *app.App) http.HandlerFunc {
 		vars := mux.Vars(r)
 		namespace := resolveNamespace(vars["namespace"])
 
+		k8sClient, err := getK8sClient(application, r)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to get k8s client: %v", err), http.StatusInternalServerError)
+			return
+		}
+
 		// Parse pagination parameters
 		limitStr := r.URL.Query().Get("limit")
 		continueToken := r.URL.Query().Get("continue")
@@ -672,15 +691,15 @@ func getServices(application *app.App) http.HandlerFunc {
 			}
 		}
 
-		// Build cache key including pagination params
-		cacheKey := fmt.Sprintf("services:%s:limit=%d:continue=%s", namespace, limit, continueToken)
+		clusterID := getClusterID(application, r)
+		cacheKey := fmt.Sprintf("%s:services:%s:limit=%d:continue=%s", clusterID, namespace, limit, continueToken)
 		ctx := r.Context()
 
 		// Only use cache for non-paginated requests
 		if limit == 0 && continueToken == "" {
-			cacheKey = fmt.Sprintf("services:%s", namespace)
+			cacheKey = fmt.Sprintf("%s:services:%s", clusterID, namespace)
 			// Use helper function for ResourceVersion check
-			if serveFromCacheIfUnchanged(w, ctx, application, cacheKey, "services", namespace) {
+			if serveFromCacheIfUnchanged(w, ctx, application, k8sClient, cacheKey, "services", namespace) {
 				return
 			}
 
@@ -698,14 +717,14 @@ func getServices(application *app.App) http.HandlerFunc {
 		}
 
 		// Fetch services with pagination
-		servicesList, err := application.K8sClient.Clientset.CoreV1().Services(namespace).List(r.Context(), listOpts)
+		servicesList, err := k8sClient.Clientset.CoreV1().Services(namespace).List(r.Context(), listOpts)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
 		// Batch fetch all EndpointSlices once to avoid N+1 queries
-		allEndpointSlices, _ := application.K8sClient.Clientset.DiscoveryV1().EndpointSlices(namespace).List(ctx, metav1.ListOptions{})
+		allEndpointSlices, _ := k8sClient.Clientset.DiscoveryV1().EndpointSlices(namespace).List(ctx, metav1.ListOptions{})
 		endpointCountMap := make(map[string]int)
 		if allEndpointSlices != nil {
 			for _, slice := range allEndpointSlices.Items {
@@ -792,8 +811,8 @@ func getPods(application *app.App) http.HandlerFunc {
 			}
 		}
 
-		// Build cache key including pagination params
-		cacheKey := fmt.Sprintf("pods:%s:limit=%d:continue=%s", namespace, limit, continueToken)
+		clusterID := getClusterID(application, r)
+		cacheKey := fmt.Sprintf("%s:pods:%s:limit=%d:continue=%s", clusterID, namespace, limit, continueToken)
 
 		// Only use cache for non-paginated requests to avoid complexity
 		if limit == 0 && continueToken == "" {
@@ -876,6 +895,12 @@ func getDeployments(application *app.App) http.HandlerFunc {
 		vars := mux.Vars(r)
 		namespace := resolveNamespace(vars["namespace"])
 
+		k8sClient, err := getK8sClient(application, r)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to get k8s client: %v", err), http.StatusInternalServerError)
+			return
+		}
+
 		// Parse pagination parameters
 		limitStr := r.URL.Query().Get("limit")
 		continueToken := r.URL.Query().Get("continue")
@@ -887,12 +912,12 @@ func getDeployments(application *app.App) http.HandlerFunc {
 			}
 		}
 
-		// Build cache key including pagination params
-		cacheKey := fmt.Sprintf("deployments:%s:limit=%d:continue=%s", namespace, limit, continueToken)
+		clusterID := getClusterID(application, r)
+		cacheKey := fmt.Sprintf("%s:deployments:%s:limit=%d:continue=%s", clusterID, namespace, limit, continueToken)
 
 		// Only use cache for non-paginated requests to avoid complexity
 		if limit == 0 && continueToken == "" {
-			cacheKey = fmt.Sprintf("deployments:%s", namespace)
+			cacheKey = fmt.Sprintf("%s:deployments:%s", clusterID, namespace)
 			if cached, ok := application.Cache.Get(cacheKey); ok {
 				json.NewEncoder(w).Encode(cached)
 				return
@@ -905,7 +930,7 @@ func getDeployments(application *app.App) http.HandlerFunc {
 			Continue: continueToken,
 		}
 
-		deployments, err := application.K8sClient.Clientset.AppsV1().Deployments(namespace).List(r.Context(), listOpts)
+		deployments, err := k8sClient.Clientset.AppsV1().Deployments(namespace).List(r.Context(), listOpts)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -1001,8 +1026,8 @@ func getHealth(application *app.App) http.HandlerFunc {
 			return
 		}
 
-		// Check cache first
-		cacheKey := fmt.Sprintf("health:%s", namespace)
+		clusterID := getClusterID(application, r)
+		cacheKey := fmt.Sprintf("%s:health:%s", clusterID, namespace)
 		if cached, ok := application.Cache.Get(cacheKey); ok {
 			json.NewEncoder(w).Encode(cached)
 			return
@@ -1030,7 +1055,7 @@ func getHealth(application *app.App) http.HandlerFunc {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			nodeCacheKey := "nodes:cluster"
+			nodeCacheKey := fmt.Sprintf("%s:nodes:cluster", clusterID)
 			if cachedNodes, ok := GetSliceFromCache(application, nodeCacheKey); ok {
 				mu.Lock()
 				nodeList = cachedNodes
@@ -1402,15 +1427,20 @@ func getReleases(application *app.App) http.HandlerFunc {
 		vars := mux.Vars(r)
 		namespace := resolveNamespace(vars["namespace"])
 
-		// Check cache first (30 second TTL for releases)
-		cacheKey := fmt.Sprintf("releases:%s", namespace)
+		k8sClient, err := getK8sClient(application, r)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to get k8s client: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		clusterID := getClusterID(application, r)
+		cacheKey := fmt.Sprintf("%s:releases:%s", clusterID, namespace)
 		if cached, ok := application.Cache.Get(cacheKey); ok {
 			json.NewEncoder(w).Encode(cached)
 			return
 		}
 
-		// Fetch from K8s API
-		releases, err := k8s.GetReleases(r.Context(), application.K8sClient.Clientset, namespace)
+		releases, err := k8s.GetReleases(r.Context(), k8sClient.Clientset, namespace)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -1430,17 +1460,21 @@ func getDeploymentHistory(application *app.App) http.HandlerFunc {
 		namespace := vars["namespace"]
 		deploymentName := vars["deployment"]
 
-		// Cache key for deployment history
-		cacheKey := fmt.Sprintf("deployment-history:%s:%s", namespace, deploymentName)
+		k8sClient, err := getK8sClient(application, r)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to get k8s client: %v", err), http.StatusInternalServerError)
+			return
+		}
 
-		// Check cache first (30 second TTL - revisions don't change often)
+		clusterID := getClusterID(application, r)
+		cacheKey := fmt.Sprintf("%s:deployment-history:%s:%s", clusterID, namespace, deploymentName)
+
 		if cached, ok := application.Cache.Get(cacheKey); ok {
 			json.NewEncoder(w).Encode(cached)
 			return
 		}
 
-		// Fetch from K8s API
-		history, err := k8s.GetDeploymentHistory(r.Context(), application.K8sClient.Clientset, namespace, deploymentName)
+		history, err := k8s.GetDeploymentHistory(r.Context(), k8sClient.Clientset, namespace, deploymentName)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -1463,12 +1497,18 @@ func getConfigMaps(application *app.App) http.HandlerFunc {
 		vars := mux.Vars(r)
 		namespace := resolveNamespace(vars["namespace"])
 
-		// Check cache
-		cacheKey := fmt.Sprintf("configmaps:%s", namespace)
+		k8sClient, err := getK8sClient(application, r)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to get k8s client: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		clusterID := getClusterID(application, r)
+		cacheKey := fmt.Sprintf("%s:configmaps:%s", clusterID, namespace)
 		ctx := r.Context()
 
 		// Use helper function for ResourceVersion check
-		if serveFromCacheIfUnchanged(w, ctx, application, cacheKey, "configmaps", namespace) {
+		if serveFromCacheIfUnchanged(w, ctx, application, k8sClient, cacheKey, "configmaps", namespace) {
 			return
 		}
 
@@ -1478,7 +1518,7 @@ func getConfigMaps(application *app.App) http.HandlerFunc {
 			return
 		}
 
-		configMaps, err := application.K8sClient.Clientset.CoreV1().ConfigMaps(namespace).List(r.Context(), metav1.ListOptions{})
+		configMaps, err := k8sClient.Clientset.CoreV1().ConfigMaps(namespace).List(r.Context(), metav1.ListOptions{})
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -1512,7 +1552,7 @@ func getConfigMaps(application *app.App) http.HandlerFunc {
 
 		// Get ResourceVersion
 		currentVersion := ""
-		if cmList, err := application.K8sClient.Clientset.CoreV1().ConfigMaps(namespace).List(r.Context(), metav1.ListOptions{Limit: 1}); err == nil {
+		if cmList, err := k8sClient.Clientset.CoreV1().ConfigMaps(namespace).List(r.Context(), metav1.ListOptions{Limit: 1}); err == nil {
 			currentVersion = cmList.ResourceVersion
 		}
 
@@ -1530,12 +1570,18 @@ func getSecrets(application *app.App) http.HandlerFunc {
 		vars := mux.Vars(r)
 		namespace := resolveNamespace(vars["namespace"])
 
-		// Check cache
-		cacheKey := fmt.Sprintf("secrets:%s", namespace)
+		k8sClient, err := getK8sClient(application, r)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to get k8s client: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		clusterID := getClusterID(application, r)
+		cacheKey := fmt.Sprintf("%s:secrets:%s", clusterID, namespace)
 		ctx := r.Context()
 
 		// Use helper function for ResourceVersion check
-		if serveFromCacheIfUnchanged(w, ctx, application, cacheKey, "secrets", namespace) {
+		if serveFromCacheIfUnchanged(w, ctx, application, k8sClient, cacheKey, "secrets", namespace) {
 			return
 		}
 
@@ -1545,7 +1591,7 @@ func getSecrets(application *app.App) http.HandlerFunc {
 			return
 		}
 
-		secrets, err := application.K8sClient.Clientset.CoreV1().Secrets(namespace).List(r.Context(), metav1.ListOptions{})
+		secrets, err := k8sClient.Clientset.CoreV1().Secrets(namespace).List(r.Context(), metav1.ListOptions{})
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -1575,7 +1621,7 @@ func getSecrets(application *app.App) http.HandlerFunc {
 
 		// Get ResourceVersion
 		currentVersion := ""
-		if secretList, err := application.K8sClient.Clientset.CoreV1().Secrets(namespace).List(r.Context(), metav1.ListOptions{Limit: 1}); err == nil {
+		if secretList, err := k8sClient.Clientset.CoreV1().Secrets(namespace).List(r.Context(), metav1.ListOptions{Limit: 1}); err == nil {
 			currentVersion = secretList.ResourceVersion
 		}
 
@@ -1594,13 +1640,19 @@ func getPVPVC(application *app.App) http.HandlerFunc {
 		namespace := resolveNamespace(vars["namespace"])
 		ctx := r.Context()
 
-		// Check cache
-		cacheKey := fmt.Sprintf("pvpvc:%s", namespace)
+		k8sClient, err := getK8sClient(application, r)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to get k8s client: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		clusterID := getClusterID(application, r)
+		cacheKey := fmt.Sprintf("%s:pvpvc:%s", clusterID, namespace)
 
 		// ResourceVersion check
 		cachedVersion, hasCachedVersion := application.Cache.GetResourceVersion(cacheKey)
 		if hasCachedVersion && cachedVersion != "" {
-			quickCheck, _ := application.K8sClient.Clientset.CoreV1().PersistentVolumeClaims(namespace).List(ctx, metav1.ListOptions{Limit: 1})
+			quickCheck, _ := k8sClient.Clientset.CoreV1().PersistentVolumeClaims(namespace).List(ctx, metav1.ListOptions{Limit: 1})
 			if quickCheck != nil && quickCheck.ResourceVersion == cachedVersion {
 				if cached, ok := application.Cache.Get(cacheKey); ok {
 					json.NewEncoder(w).Encode(cached)
@@ -1615,14 +1667,14 @@ func getPVPVC(application *app.App) http.HandlerFunc {
 		}
 
 		// Fetch all PVs (cluster-wide)
-		pvList, err := application.K8sClient.Clientset.CoreV1().PersistentVolumes().List(ctx, metav1.ListOptions{})
+		pvList, err := k8sClient.Clientset.CoreV1().PersistentVolumes().List(ctx, metav1.ListOptions{})
 		if err != nil {
 			http.Error(w, fmt.Sprintf("Failed to fetch PVs: %v", err), http.StatusInternalServerError)
 			return
 		}
 
 		// Fetch all PVCs in the namespace
-		pvcList, err := application.K8sClient.Clientset.CoreV1().PersistentVolumeClaims(namespace).List(ctx, metav1.ListOptions{})
+		pvcList, err := k8sClient.Clientset.CoreV1().PersistentVolumeClaims(namespace).List(ctx, metav1.ListOptions{})
 		if err != nil {
 			http.Error(w, fmt.Sprintf("Failed to fetch PVCs: %v", err), http.StatusInternalServerError)
 			return
@@ -1767,7 +1819,7 @@ func getPVPVC(application *app.App) http.HandlerFunc {
 			}
 
 			// Find pods using this PVC with detailed information
-			pods, _ := application.K8sClient.Clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{})
+			pods, _ := k8sClient.Clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{})
 			usingPods := []string{}
 			podDetails := []map[string]interface{}{}
 			for _, pod := range pods.Items {
@@ -1896,15 +1948,21 @@ func getCRDs(application *app.App) http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 		ctx := r.Context()
 
-		// Check cache first
-		cacheKey := "crds:cluster"
+		k8sClient, err := getK8sClient(application, r)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to get k8s client: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		clusterID := getClusterID(application, r)
+		cacheKey := fmt.Sprintf("%s:crds:cluster", clusterID)
 		if cached, ok := application.Cache.Get(cacheKey); ok {
 			json.NewEncoder(w).Encode(cached)
 			return
 		}
 
 		// Get CRDs using apiextensions client
-		apiextensionsClient, err := apiextensionsclientset.NewForConfig(application.K8sClient.Config)
+		apiextensionsClient, err := apiextensionsclientset.NewForConfig(k8sClient.Config)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("Failed to create apiextensions client: %v", err), http.StatusInternalServerError)
 			return
@@ -2041,9 +2099,15 @@ func getCronJobsAndJobs(application *app.App) http.HandlerFunc {
 		namespace := resolveNamespace(vars["namespace"])
 		ctx := r.Context()
 
+		k8sClient, err := getK8sClient(application, r)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to get k8s client: %v", err), http.StatusInternalServerError)
+			return
+		}
+
 		// Fetch CronJobs
 		cronJobs := []map[string]interface{}{}
-		cjList, err := application.K8sClient.Clientset.BatchV1().CronJobs(namespace).List(ctx, metav1.ListOptions{})
+		cjList, err := k8sClient.Clientset.BatchV1().CronJobs(namespace).List(ctx, metav1.ListOptions{})
 		if err == nil {
 			for _, cj := range cjList.Items {
 				suspend := false
@@ -2075,7 +2139,7 @@ func getCronJobsAndJobs(application *app.App) http.HandlerFunc {
 		}
 
 		// Fetch Jobs and group under their owner CronJob
-		jobList, err := application.K8sClient.Clientset.BatchV1().Jobs(namespace).List(ctx, metav1.ListOptions{})
+		jobList, err := k8sClient.Clientset.BatchV1().Jobs(namespace).List(ctx, metav1.ListOptions{})
 		if err == nil {
 			// Build cronjob map for quick lookup
 			cjMap := map[string]map[string]interface{}{}
