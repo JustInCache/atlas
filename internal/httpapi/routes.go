@@ -10,6 +10,33 @@ import (
 	"github.com/gorilla/mux"
 )
 
+// corsMiddleware handles Cross-Origin Resource Sharing (CORS)
+func corsMiddleware() mux.MiddlewareFunc {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Set CORS headers
+			origin := r.Header.Get("Origin")
+			if origin == "" {
+				origin = "*"
+			}
+
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH")
+			w.Header().Set("Access-Control-Allow-Headers", "Accept, Authorization, Content-Type, X-CSRF-Token, X-Requested-With")
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
+			w.Header().Set("Access-Control-Max-Age", "86400")
+
+			// Handle preflight requests
+			if r.Method == "OPTIONS" {
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 // loggingMiddleware logs all HTTP requests
 func loggingMiddleware(logger *slog.Logger) mux.MiddlewareFunc {
 	return func(next http.Handler) http.Handler {
@@ -32,9 +59,14 @@ func loggingMiddleware(logger *slog.Logger) mux.MiddlewareFunc {
 
 func SetupRoutes(application *app.App) *mux.Router {
 	r := mux.NewRouter()
-	// Add logging middleware
+	// Add middleware (order matters!)
+	// 1. CORS - must be first to handle preflight requests
+	r.Use(corsMiddleware())
+	// 2. Session - sets atlas_session cookie for user identification
 	r.Use(sessionMiddleware())
+	// 3. Logging - logs all requests
 	r.Use(loggingMiddleware(application.Logger))
+	// 4. Rate limiting - uses atlas_session cookie (per-user, not per-IP)
 	r.Use(rateLimitMiddleware())
 	// Serve static files
 	r.PathPrefix("/static/").Handler(http.StripPrefix("/static/", http.FileServer(http.Dir("./ui"))))
