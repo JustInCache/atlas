@@ -5475,10 +5475,10 @@ function renderJobsTable(jobs, container) {
                 <thead>
                     <tr>
                         <th class="sortable" onclick="sortTable('jobs', '.job-table', 0, 'string')">
-                            Status<span class="sort-icon"></span>
+                            Job Name<span class="sort-icon"></span>
                         </th>
                         <th class="sortable" onclick="sortTable('jobs', '.job-table', 1, 'string')">
-                            Job Name<span class="sort-icon"></span>
+                            Status<span class="sort-icon"></span>
                         </th>
                         <th class="sortable" onclick="sortTable('jobs', '.job-table', 2, 'string')">
                             Parent CronJob<span class="sort-icon"></span>
@@ -5526,8 +5526,8 @@ function renderJobsTable(jobs, container) {
 
             html += `
                 <tr class="clickable-row" onclick="openDetailPanel('jobsDetails', 'Job', '${job.namespace}', '${job.name}')">
-                    <td><span class="${statusClass}">${job.status || '-'}</span></td>
                     <td><code>${job.name}</code></td>
+                    <td><span class="${statusClass}">${job.status || '-'}</span></td>
                     <td>${ownerHtml}</td>
                     <td>${job.completions ?? '-'}</td>
                     <td>${job.succeeded ?? 0}</td>
