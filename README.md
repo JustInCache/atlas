@@ -15,120 +15,26 @@
 - **Health Dashboard** - Real-time cluster health with node monitoring and events
 - **Modern UI** - Dark theme with collapsible sections and responsive design
 
-## �️ Architecture Flow
-
-Atlas follows a lightweight, read-only architecture optimized for performance and scalability:
+## 🏗️ Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                              USER BROWSER                               │
-│  ┌──────────────┐  ┌──────────────┐   ┌──────────────┐                  │
-│  │   Dashboard  │  │   Explorer   │   │ Detail Panel │                  │
-│  │   (Vue.js)   │  │ (Vanilla JS) │   │  (Dynamic)   │                  │
-│  └──────┬───────┘  └──────┬───────┘   └──────┬───────┘                  │
-│         │                 │                  │                          │
-│         └─────────────────┴──────────────────┘                          │
-│                           │                                             │
-│                    Auto-Refresh (30s-180s)                              │
-│                    Priority-Based Polling                               │
-└───────────────────────────┼─────────────────────────────────────────────┘
-                            │
-                     HTTP REST API
-                            │
-┌───────────────────────────▼──────────────────────────────────────────────┐
-│                        GO HTTP SERVER (Port 8080)                        │
-│  ┌──────────────────────────────────────────────────────────────────┐    │
-│  │                      Gorilla Mux Router                          │    │
-│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐               │    │
-│  │  │   /api/pods │  │ /api/deploy │  │/api/services│   +14 more    │    │
-│  │  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘               │    │
-│  └─────────┼─────────────────┼─────────────────┼────────────────────┘    │
-│            │                 │                 │                         │
-│  ┌─────────▼─────────────────▼─────────────────▼────────────────────┐    │
-│  │                     HTTP API Handlers                            │    │
-│  │   • Rate Limiting (100 req/s per user)                           │    │
-│  │   • Session Management (Cookie-based)                            │    │
-│  │   • GetOrFetch Pattern (Cache-first).                             │    │
-│  └─────────┬────────────────────────────────────────────────────────┘    │
-└────────────┼─────────────────────────────────────────────────────────────┘
-             │
-             │ Cache Lookup
-             ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│                         CACHING LAYER                                  │
-│  ┌──────────────────────────────────────────────────────────────┐      │
-│  │   In-Memory Cache (sync.RWMutex + singleflight)               │      │
-│  │   • TTL: 5-60s (resource-dependent)                          │      │
-│  │   • Cache Hit Rate: 70-80%                                   │      │
-│  │   • ResourceVersion Tracking                                 │      │
-│  │   • Request Deduplication (~95% reduction)                   │      │
-│  └──────────────────────────────────────────────────────────────┘      │
-│                                                                        │
-│  ┌──────────────────────────────────────────────────────────────┐      │
-│  │   Redis Cache (Multi-Cluster Mode)                           │      │
-│  │   • Shared cache across Atlas instances                      │      │
-│  │   • Cluster-scoped namespacing                               │      │
-│  │   • Automatic failover to in-memory                          │      │
-│  └──────────────────────────────────────────────────────────────┘      │
-└────────────┬───────────────────────────────────────────────────────────┘
-             │
-             │ Cache Miss → Fetch from K8s
-             ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│                     KUBERNETES CLIENT-GO                               │
-│  ┌──────────────────────────────────────────────────────────────┐      │
-│  │   Connection Pool (200 max idle, 50 QPS burst 100)           │      │
-│  │   • API Server Load Balancing                                │      │
-│  │   • Automatic Retry with Backoff                             │      │
-│  │   • Read-Only Operations (List/Get only)                     │      │
-│  └──────────────────────────────────────────────────────────────┘      │
-└────────────┬───────────────────────────────────────────────────────────┘
-             │
-             │ GET/LIST API Calls
-             ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│                    KUBERNETES API SERVER                               │
-│  ┌──────────────────────────────────────────────────────────────┐      │
-│  │   Core Resources: Pods, Services, Nodes, Events              │      │
-│  │   Apps: Deployments, StatefulSets, DaemonSets                │      │
-│  │   Batch: Jobs, CronJobs                                      │      │
-│  │   Networking: Ingresses, Endpoints                           │      │
-│  │   Storage: PVs, PVCs, StorageClasses                         │      │
-│  │   Config: ConfigMaps, Secrets                                │      │
-│  │   Autoscaling: HPAs, PDBs                                    │      │
-│  │   Custom: CRDs                                               │      │
-│  └──────────────────────────────────────────────────────────────┘      │
-└────────────────────────────────────────────────────────────────────────┘
+Browser (Vanilla JS)
+    ↓ HTTP REST API
+Go Server (Gorilla Mux + Rate Limiting)
+    ↓ GetOrFetch Pattern
+Cache Layer (In-Memory + Redis)
+  • 70-80% hit rate
+  • 5-60s TTL
+  • Singleflight deduplication
+    ↓ On Cache Miss
+Kubernetes Client-GO (Read-Only)
+    ↓ List/Get
+Kubernetes API Server
 ```
 
-### Request Flow Example
+**Performance**: <2s initial load, <10ms cache hits, 50-100 concurrent users, 1-2 K8s API calls/s
 
-1. **User Action**: User opens "Pods" tab in browser
-2. **API Request**: `GET /api/pods/default` sent to Go server
-3. **Cache Check**: Handler checks cache with key `cluster:pods:default`
-4. **Cache Hit**: Return cached data (TTL: 30s for pods)
-5. **Cache Miss**: 
-   - Singleflight ensures only 1 K8s API call for concurrent requests
-   - Fetch from Kubernetes API: `client.CoreV1().Pods("default").List()`
-   - Store in cache with ResourceVersion tracking
-   - Return data to browser
-6. **Auto-Refresh**: Browser polls every 30s (HIGH priority for pods)
-7. **Next Request**: Served from cache (70%+ hit rate)
-
-### Performance Characteristics
-
-| Component | Metric | Value |
-|-----------|--------|-------|
-| **Frontend** | Initial Load | < 2s (critical data) |
-| **Frontend** | Full Dashboard | 2-3s |
-| **Backend** | Cache Hit Response | < 10ms |
-| **Backend** | Cache Miss Response | 50-200ms |
-| **Backend** | Concurrent Users | 50-100 (optimized) |
-| **Caching** | Hit Rate | 70-80% |
-| **Caching** | Request Deduplication | ~95% reduction |
-| **K8s API** | Calls Per Second | 1-2 req/s (with cache) |
-
-## �🌐 Multi-Cluster Support (New!)
+## 🌐 Multi-Cluster Support (New!)
 
 Atlas now supports multi-cluster deployments with Redis-backed caching:
 
