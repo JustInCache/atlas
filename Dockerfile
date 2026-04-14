@@ -41,9 +41,9 @@ RUN chmod +x /app/entrypoint.sh
 
 # Create non-root user before copying kubeconfigs so we can set ownership
 RUN adduser -D -u 1000 appuser \
-  && mkdir -p /home/appuser/.kube /app/kubeconfigs
+  && mkdir -p /home/appuser/.kube /app/kubeconfigs \
+  && chown appuser:appuser /app/kubeconfigs
 
-# Copy kubeconfig files and make them writable by appuser (entrypoint may overwrite from env vars)
 COPY --chown=appuser:appuser kubeconfigs/ /app/kubeconfigs/
 USER appuser
 
