@@ -309,14 +309,6 @@ function renderJobSpecificDetails(data) {
     
     return html;
 }
-        Object.entries(data.labels).forEach(([key, value]) => {
-            html += `<span class="label-badge">${key}: ${value}</span>`;
-        });
-        html += '</div></div></div>';
-    }
-    
-    return html;
-}
 
 // Endpoints-specific details
 function renderEndpointsSpecificDetails(data) {
