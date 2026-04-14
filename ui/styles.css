@@ -3768,6 +3768,103 @@ body {
 }
 
 /* ==============================================
+   ARGS AND ENV VARS STYLING (Jobs/CronJobs)
+   ============================================== */
+
+/* Args List Styles */
+.args-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 4px;
+}
+
+.arg-item {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+    font-size: 0.85em;
+    color: var(--text-primary);
+}
+
+.arg-item code {
+    color: var(--accent-color);
+}
+
+/* Environment Variables Styles */
+.env-vars-section {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border-color);
+}
+
+.subsection-title {
+    font-size: 0.9em;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.env-vars-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 300px;
+    overflow-y: auto;
+    padding: 4px;
+}
+
+.env-var-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    font-size: 0.85em;
+    flex-wrap: wrap;
+}
+
+.env-name {
+    font-weight: 600;
+    color: var(--accent-color);
+    font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+    min-width: 120px;
+    flex-shrink: 0;
+}
+
+.env-value {
+    color: var(--text-primary);
+    font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+    flex: 1;
+    word-break: break-all;
+}
+
+.env-value-sensitive {
+    color: var(--text-secondary);
+    font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+    font-style: italic;
+    flex: 1;
+}
+
+.env-value-ref {
+    color: var(--warning-color);
+    font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+    font-size: 0.9em;
+    flex: 1;
+}
+
+.sensitive-badge {
+    font-size: 0.9em;
+    margin-left: auto;
+}
+
+/* ==============================================
    CONDITIONS LIST (for Pod Details)
    ============================================== */
 .conditions-list {

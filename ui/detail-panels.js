@@ -834,58 +834,166 @@ function renderCronJobSpecificDetails(data) {
     const details = data.details || data;
     
     // Schedule info
-    html += '<div class="info-section"><h4 class="section-title"><span class="section-icon">⏰</span>Schedule Information</h4><div class="info-grid">';
+    const scheduleId = `schedule-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    html += '<div class="details-section collapsible-section">';
+    html += `<h4 class="section-title collapsible-header" onclick="toggleSection('${scheduleId}')">`;
+    html += `<span class="collapse-icon" id="${scheduleId}-icon">▼</span>`;
+    html += '<span class="section-icon">⏰</span>Schedule Information</h4>';
+    html += `<div class="section-content" id="${scheduleId}" style="display: block;">`;
+    html += '<div class="info-grid">';
     
     if (details.schedule) {
-        html += `
-            <div class="info-item">
-                <label class="info-label">Schedule</label>
-                <span class="info-value"><code>${details.schedule}</code></span>
-            </div>
-        `;
+        html += `<div class="info-item"><label class="info-label">Schedule:</label><span class="info-value"><code>${details.schedule}</code></span></div>`;
     }
     
     if (details.suspend !== undefined) {
-        html += `
-            <div class="info-item">
-                <label class="info-label">Suspended</label>
-                <span class="info-value">${details.suspend ? 'Yes' : 'No'}</span>
-            </div>
-        `;
+        html += `<div class="info-item"><label class="info-label">Suspended:</label><span class="info-value">${details.suspend ? 'Yes' : 'No'}</span></div>`;
     }
     
     if (details.last_schedule_time) {
-        html += `
-            <div class="info-item">
-                <label class="info-label">Last Schedule</label>
-                <span class="info-value">${new Date(details.last_schedule_time).toLocaleString()}</span>
-            </div>
-        `;
+        html += `<div class="info-item"><label class="info-label">Last Schedule:</label><span class="info-value">${new Date(details.last_schedule_time).toLocaleString()}</span></div>`;
     }
     
     if (details.next_run_in) {
-        html += `
-            <div class="info-item">
-                <label class="info-label">Next Run</label>
-                <span class="info-value">${details.next_run_in}</span>
-            </div>
-        `;
+        html += `<div class="info-item"><label class="info-label">Next Run:</label><span class="info-value">${details.next_run_in}</span></div>`;
     }
     
-    if (details.active_count !== undefined) {
-        html += `
-            <div class="info-item">
-                <label class="info-label">Active Jobs</label>
-                <span class="info-value">${details.active_count}</span>
-            </div>
-        `;
+    if (details.active_jobs !== undefined) {
+        html += `<div class="info-item"><label class="info-label">Active Jobs:</label><span class="info-value">${details.active_jobs}</span></div>`;
     }
     
-    html += '</div></div>';
+    if (details.concurrency_policy) {
+        html += `<div class="info-item"><label class="info-label">Concurrency Policy:</label><span class="info-value">${details.concurrency_policy}</span></div>`;
+    }
+    
+    if (details.successful_jobs_history_limit !== undefined) {
+        html += `<div class="info-item"><label class="info-label">Success History Limit:</label><span class="info-value">${details.successful_jobs_history_limit}</span></div>`;
+    }
+    
+    if (details.failed_jobs_history_limit !== undefined) {
+        html += `<div class="info-item"><label class="info-label">Failed History Limit:</label><span class="info-value">${details.failed_jobs_history_limit}</span></div>`;
+    }
+    
+    if (details.starting_deadline_seconds !== undefined && details.starting_deadline_seconds !== null) {
+        html += `<div class="info-item"><label class="info-label">Starting Deadline:</label><span class="info-value">${details.starting_deadline_seconds}s</span></div>`;
+    }
+    
+    html += '</div></div></div>';
+    
+    // Job Template Spec
+    const jobTemplateId = `jobtemplate-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    html += '<div class="details-section collapsible-section">';
+    html += `<h4 class="section-title collapsible-header" onclick="toggleSection('${jobTemplateId}')">`;
+    html += `<span class="collapse-icon" id="${jobTemplateId}-icon">▼</span>`;
+    html += '<span class="section-icon">📋</span>Job Template</h4>';
+    html += `<div class="section-content" id="${jobTemplateId}" style="display: block;">`;
+    html += '<div class="info-grid">';
+    
+    if (details.completions !== undefined) {
+        html += `<div class="info-item"><label class="info-label">Completions:</label><span class="info-value">${details.completions}</span></div>`;
+    }
+    
+    if (details.parallelism !== undefined) {
+        html += `<div class="info-item"><label class="info-label">Parallelism:</label><span class="info-value">${details.parallelism}</span></div>`;
+    }
+    
+    if (details.backoff_limit !== undefined) {
+        html += `<div class="info-item"><label class="info-label">Backoff Limit:</label><span class="info-value">${details.backoff_limit}</span></div>`;
+    }
+    
+    html += '</div></div></div>';
+    
+    // Containers Section
+    if (details.containers && details.containers.length > 0) {
+        const containersId = `containers-cronjob-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        html += '<div class="details-section collapsible-section">';
+        html += `<h4 class="section-title collapsible-header" onclick="toggleSection('${containersId}')">`;
+        html += `<span class="collapse-icon" id="${containersId}-icon">▼</span>`;
+        html += `<span class="section-icon">🐳</span>Containers (${details.containers.length})</h4>`;
+        html += `<div class="section-content" id="${containersId}" style="display: block;">`;
+        
+        details.containers.forEach((container, idx) => {
+            html += '<div class="container-card">';
+            html += `<div class="container-header"><span class="container-name">${idx + 1}. ${container.name}</span></div>`;
+            html += '<div class="info-grid">';
+            html += `<div class="info-item"><label class="info-label">Image:</label><span class="info-value code">${container.image}</span></div>`;
+            
+            // Command
+            if (container.command && container.command.length > 0) {
+                html += `<div class="info-item" style="grid-column: 1 / -1;">`;
+                html += `<label class="info-label">Command:</label>`;
+                html += `<span class="info-value"><code>${container.command.join(' ')}</code></span>`;
+                html += `</div>`;
+            }
+            
+            // Args
+            if (container.args && container.args.length > 0) {
+                html += `<div class="info-item" style="grid-column: 1 / -1;">`;
+                html += `<label class="info-label">Args:</label>`;
+                html += `<div class="args-list">`;
+                container.args.forEach(arg => {
+                    html += `<div class="arg-item"><code>${arg}</code></div>`;
+                });
+                html += `</div></div>`;
+            }
+            
+            // Ports
+            if (container.ports && container.ports.length > 0) {
+                const portsStr = container.ports.map(p => `${p.container_port}/${p.protocol || 'TCP'}`).join(', ');
+                html += `<div class="info-item"><label class="info-label">Ports:</label><span class="info-value">${portsStr}</span></div>`;
+            }
+            
+            // Resources
+            if (container.resources) {
+                if (container.resources.requests) {
+                    const req = container.resources.requests;
+                    html += `<div class="info-item"><label class="info-label">Requests:</label><span class="info-value">CPU: ${req.cpu || '0'}, Mem: ${req.memory || '0'}</span></div>`;
+                }
+                if (container.resources.limits) {
+                    const lim = container.resources.limits;
+                    html += `<div class="info-item"><label class="info-label">Limits:</label><span class="info-value">CPU: ${lim.cpu || '∞'}, Mem: ${lim.memory || '∞'}</span></div>`;
+                }
+            }
+            
+            html += '</div>';
+            
+            // Environment Variables
+            if (container.env && container.env.length > 0) {
+                html += '<div class="env-vars-section">';
+                html += '<h5 class="subsection-title">Environment Variables</h5>';
+                html += '<div class="env-vars-list">';
+                container.env.forEach(env => {
+                    const isSensitive = env.sensitive || false;
+                    const valueClass = isSensitive ? 'env-value-sensitive' : 'env-value';
+                    html += '<div class="env-var-item">';
+                    html += `<span class="env-name">${env.name}:</span>`;
+                    if (env.value_from) {
+                        html += `<span class="env-value-ref">${env.value_from}</span>`;
+                    } else {
+                        html += `<span class="${valueClass}">${env.value || ''}</span>`;
+                    }
+                    if (isSensitive) {
+                        html += '<span class="sensitive-badge">🔒</span>';
+                    }
+                    html += '</div>';
+                });
+                html += '</div></div>';
+            }
+            
+            html += '</div>';
+        });
+        
+        html += '</div></div>';
+    }
     
     // Jobs - use detailed render function from script.js if available
     if (details.jobs && details.jobs.length > 0) {
-        html += '<div class="info-section"><h4 class="section-title"><span class="section-icon">📋</span>Jobs</h4>';
+        const jobsId = `jobs-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        html += '<div class="details-section collapsible-section">';
+        html += `<h4 class="section-title collapsible-header" onclick="toggleSection('${jobsId}')">`;
+        html += `<span class="collapse-icon" id="${jobsId}-icon">▼</span>`;
+        html += '<span class="section-icon">📋</span>Jobs</h4>';
+        html += `<div class="section-content" id="${jobsId}" style="display: block;">`;
         if (typeof renderJobsUnderCronJob === 'function') {
             html += renderJobsUnderCronJob(details.jobs);
         } else {
@@ -894,16 +1002,26 @@ function renderCronJobSpecificDetails(data) {
             details.jobs.forEach(job => {
                 const statusClass = job.status === 'Completed' ? 'success' : 
                                   job.status === 'Failed' ? 'danger' : 'info';
-                html += `
-                    <div class="info-item">
-                        <label class="info-label">${job.name}</label>
-                        <span class="info-value"><span class="badge-${statusClass}">${job.status}</span> - ${job.age || 'N/A'}</span>
-                    </div>
-                `;
+                html += `<div class="info-item"><label class="info-label">${job.name}</label><span class="info-value"><span class="badge-${statusClass}">${job.status}</span> - ${job.age || 'N/A'}</span></div>`;
             });
             html += '</div>';
         }
-        html += '</div>';
+        html += '</div></div>';
+    }
+    
+    // Labels
+    if (details.labels && Object.keys(details.labels).length > 0) {
+        const labelsId = `labels-cronjob-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        html += '<div class="details-section collapsible-section">';
+        html += `<h4 class="section-title collapsible-header" onclick="toggleSection('${labelsId}')">`;
+        html += `<span class="collapse-icon" id="${labelsId}-icon">▼</span>`;
+        html += '<span class="section-icon">🏷️</span>Labels</h4>';
+        html += `<div class="section-content" id="${labelsId}" style="display: block;">`;
+        html += '<div class="labels-container">';
+        Object.entries(details.labels).forEach(([key, value]) => {
+            html += `<span class="label-badge">${key}: ${value}</span>`;
+        });
+        html += '</div></div></div>';
     }
     
     return html;

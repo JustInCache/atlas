@@ -173,6 +173,89 @@ function renderJobSpecificDetails(data) {
     }
     html += '</div></div></div>';
     
+    // Containers Section
+    if (details.containers && details.containers.length > 0) {
+        const containersId = `containers-job-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        html += '<div class="details-section collapsible-section">';
+        html += `<h4 class="section-title collapsible-header" onclick="toggleSection('${containersId}')">`;
+        html += `<span class="collapse-icon" id="${containersId}-icon">▼</span>`;
+        html += `<span class="section-icon">🐳</span>Containers (${details.containers.length})</h4>`;
+        html += `<div class="section-content" id="${containersId}" style="display: block;">`;
+        
+        details.containers.forEach((container, idx) => {
+            html += '<div class="container-card">';
+            html += `<div class="container-header"><span class="container-name">${idx + 1}. ${container.name}</span></div>`;
+            html += '<div class="info-grid">';
+            html += `<div class="info-item"><label class="info-label">Image:</label><span class="info-value code">${container.image}</span></div>`;
+            
+            // Command
+            if (container.command && container.command.length > 0) {
+                html += `<div class="info-item" style="grid-column: 1 / -1;">`;
+                html += `<label class="info-label">Command:</label>`;
+                html += `<span class="info-value"><code>${container.command.join(' ')}</code></span>`;
+                html += `</div>`;
+            }
+            
+            // Args
+            if (container.args && container.args.length > 0) {
+                html += `<div class="info-item" style="grid-column: 1 / -1;">`;
+                html += `<label class="info-label">Args:</label>`;
+                html += `<div class="args-list">`;
+                container.args.forEach(arg => {
+                    html += `<div class="arg-item"><code>${arg}</code></div>`;
+                });
+                html += `</div></div>`;
+            }
+            
+            // Ports
+            if (container.ports && container.ports.length > 0) {
+                const portsStr = container.ports.map(p => `${p.container_port}/${p.protocol || 'TCP'}`).join(', ');
+                html += `<div class="info-item"><label class="info-label">Ports:</label><span class="info-value">${portsStr}</span></div>`;
+            }
+            
+            // Resources
+            if (container.resources) {
+                if (container.resources.requests) {
+                    const req = container.resources.requests;
+                    html += `<div class="info-item"><label class="info-label">Requests:</label><span class="info-value">CPU: ${req.cpu || '0'}, Mem: ${req.memory || '0'}</span></div>`;
+                }
+                if (container.resources.limits) {
+                    const lim = container.resources.limits;
+                    html += `<div class="info-item"><label class="info-label">Limits:</label><span class="info-value">CPU: ${lim.cpu || '∞'}, Mem: ${lim.memory || '∞'}</span></div>`;
+                }
+            }
+            
+            html += '</div>';
+            
+            // Environment Variables
+            if (container.env && container.env.length > 0) {
+                html += '<div class="env-vars-section">';
+                html += '<h5 class="subsection-title">Environment Variables</h5>';
+                html += '<div class="env-vars-list">';
+                container.env.forEach(env => {
+                    const isSensitive = env.sensitive || false;
+                    const valueClass = isSensitive ? 'env-value-sensitive' : 'env-value';
+                    html += '<div class="env-var-item">';
+                    html += `<span class="env-name">${env.name}:</span>`;
+                    if (env.value_from) {
+                        html += `<span class="env-value-ref">${env.value_from}</span>`;
+                    } else {
+                        html += `<span class="${valueClass}">${env.value || ''}</span>`;
+                    }
+                    if (isSensitive) {
+                        html += '<span class="sensitive-badge">🔒</span>';
+                    }
+                    html += '</div>';
+                });
+                html += '</div></div>';
+            }
+            
+            html += '</div>';
+        });
+        
+        html += '</div></div>';
+    }
+    
     // Conditions
     if (details.conditions && details.conditions.length > 0) {
         const conditionsId = `conditions-job-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -218,6 +301,14 @@ function renderJobSpecificDetails(data) {
         html += '<span class="section-icon">🏷️</span>Labels</h4>';
         html += `<div class="section-content" id="${labelsId}" style="display: block;">`;
         html += '<div class="labels-container">';
+        Object.entries(data.labels).forEach(([key, value]) => {
+            html += `<span class="label-badge">${key}: ${value}</span>`;
+        });
+        html += '</div></div></div>';
+    }
+    
+    return html;
+}
         Object.entries(data.labels).forEach(([key, value]) => {
             html += `<span class="label-badge">${key}: ${value}</span>`;
         });

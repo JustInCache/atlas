@@ -1052,6 +1052,129 @@ func buildDaemonSetDetails(ds *appsv1.DaemonSet, application *app.App, k8sClient
 	}
 }
 
+// extractContainersInfo extracts detailed container information including args, env vars, and resources
+func extractContainersInfo(containers []corev1.Container) []map[string]interface{} {
+	result := []map[string]interface{}{}
+
+	for _, c := range containers {
+		container := map[string]interface{}{
+			"name":  c.Name,
+			"image": c.Image,
+		}
+
+		// Add command and args
+		if len(c.Command) > 0 {
+			container["command"] = c.Command
+		}
+		if len(c.Args) > 0 {
+			container["args"] = c.Args
+		}
+
+		// Add ports
+		if len(c.Ports) > 0 {
+			ports := []map[string]interface{}{}
+			for _, p := range c.Ports {
+				ports = append(ports, map[string]interface{}{
+					"name":           p.Name,
+					"container_port": p.ContainerPort,
+					"protocol":       string(p.Protocol),
+				})
+			}
+			container["ports"] = ports
+		}
+
+		// Add environment variables (with sensitive masking)
+		if len(c.Env) > 0 {
+			envVars := []map[string]interface{}{}
+			for _, e := range c.Env {
+				envVar := map[string]interface{}{
+					"name": e.Name,
+				}
+
+				// Mask sensitive values
+				if isSensitiveEnvVar(e.Name) {
+					envVar["value"] = "********"
+					envVar["sensitive"] = true
+				} else if e.Value != "" {
+					envVar["value"] = e.Value
+				} else if e.ValueFrom != nil {
+					// For values from ConfigMap, Secret, etc.
+					if e.ValueFrom.SecretKeyRef != nil {
+						envVar["value"] = "********"
+						envVar["sensitive"] = true
+						envVar["value_from"] = fmt.Sprintf("Secret: %s (key: %s)", e.ValueFrom.SecretKeyRef.Name, e.ValueFrom.SecretKeyRef.Key)
+					} else if e.ValueFrom.ConfigMapKeyRef != nil {
+						envVar["value_from"] = fmt.Sprintf("ConfigMap: %s (key: %s)", e.ValueFrom.ConfigMapKeyRef.Name, e.ValueFrom.ConfigMapKeyRef.Key)
+					} else if e.ValueFrom.FieldRef != nil {
+						envVar["value_from"] = fmt.Sprintf("Field: %s", e.ValueFrom.FieldRef.FieldPath)
+					} else if e.ValueFrom.ResourceFieldRef != nil {
+						envVar["value_from"] = fmt.Sprintf("Resource: %s", e.ValueFrom.ResourceFieldRef.Resource)
+					}
+				}
+
+				envVars = append(envVars, envVar)
+			}
+			container["env"] = envVars
+		}
+
+		// Add resource requirements
+		if c.Resources.Requests != nil || c.Resources.Limits != nil {
+			resources := map[string]interface{}{}
+			if c.Resources.Requests != nil {
+				requests := map[string]string{}
+				if cpu, ok := c.Resources.Requests["cpu"]; ok {
+					requests["cpu"] = cpu.String()
+				}
+				if mem, ok := c.Resources.Requests["memory"]; ok {
+					requests["memory"] = mem.String()
+				}
+				resources["requests"] = requests
+			}
+			if c.Resources.Limits != nil {
+				limits := map[string]string{}
+				if cpu, ok := c.Resources.Limits["cpu"]; ok {
+					limits["cpu"] = cpu.String()
+				}
+				if mem, ok := c.Resources.Limits["memory"]; ok {
+					limits["memory"] = mem.String()
+				}
+				resources["limits"] = limits
+			}
+			container["resources"] = resources
+		}
+
+		result = append(result, container)
+	}
+
+	return result
+}
+
+// isSensitiveEnvVar checks if an environment variable name indicates sensitive data
+func isSensitiveEnvVar(name string) bool {
+	sensitivePrefixes := []string{"PASSWORD", "SECRET", "TOKEN", "KEY", "API_KEY", "AUTH", "CREDENTIAL", "PRIVATE"}
+	upperName := strings.ToUpper(name)
+
+	for _, prefix := range sensitivePrefixes {
+		if strings.Contains(upperName, prefix) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// formatDuration formats a duration in a human-readable format
+func formatDuration(d time.Duration) string {
+	if d < time.Minute {
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	} else if d < time.Hour {
+		return fmt.Sprintf("%dm%ds", int(d.Minutes()), int(d.Seconds())%60)
+	} else if d < 24*time.Hour {
+		return fmt.Sprintf("%dh%dm", int(d.Hours()), int(d.Minutes())%60)
+	}
+	return fmt.Sprintf("%dd%dh", int(d.Hours()/24), int(d.Hours())%24)
+}
+
 func buildJobDetails(job *batchv1.Job, application *app.App, k8sClient *k8s.Client, ctx context.Context) map[string]interface{} {
 	status := "Running"
 	health := 50
@@ -1063,19 +1186,54 @@ func buildJobDetails(job *batchv1.Job, application *app.App, k8sClient *k8s.Clie
 		health = 0
 	}
 
+	// Extract container information from the pod template
+	containers := extractContainersInfo(job.Spec.Template.Spec.Containers)
+
+	details := map[string]interface{}{
+		"completions":   job.Spec.Completions,
+		"parallelism":   job.Spec.Parallelism,
+		"succeeded":     job.Status.Succeeded,
+		"failed":        job.Status.Failed,
+		"active":        job.Status.Active,
+		"backoff_limit": job.Spec.BackoffLimit,
+		"containers":    containers,
+		"labels":        job.Labels,
+		"annotations":   job.Annotations,
+	}
+
+	// Add start/completion times
+	if job.Status.StartTime != nil {
+		details["start_time"] = job.Status.StartTime.Format("2006-01-02 15:04:05")
+	}
+	if job.Status.CompletionTime != nil {
+		details["completion_time"] = job.Status.CompletionTime.Format("2006-01-02 15:04:05")
+		if job.Status.StartTime != nil {
+			duration := job.Status.CompletionTime.Sub(job.Status.StartTime.Time)
+			details["duration"] = formatDuration(duration)
+		}
+	}
+
+	// Add conditions
+	conditions := []map[string]interface{}{}
+	for _, c := range job.Status.Conditions {
+		conditions = append(conditions, map[string]interface{}{
+			"type":    string(c.Type),
+			"status":  string(c.Status),
+			"reason":  c.Reason,
+			"message": c.Message,
+		})
+	}
+	if len(conditions) > 0 {
+		details["conditions"] = conditions
+	}
+
 	return map[string]interface{}{
 		"name":          job.Name,
 		"namespace":     job.Namespace,
 		"resource_type": "Job",
 		"status":        status,
 		"health_score":  health,
-		"details": map[string]interface{}{
-			"completions": job.Spec.Completions,
-			"parallelism": job.Spec.Parallelism,
-			"succeeded":   job.Status.Succeeded,
-			"failed":      job.Status.Failed,
-			"active":      job.Status.Active,
-		},
+		"details":       details,
 		"relationships": buildJobRelationships(job, application, k8sClient, ctx),
 	}
 }
@@ -1088,19 +1246,41 @@ func buildCronJobDetails(cj *batchv1.CronJob, application *app.App, k8sClient *k
 		health = 50
 	}
 
+	// Extract container information from the job template's pod template
+	containers := extractContainersInfo(cj.Spec.JobTemplate.Spec.Template.Spec.Containers)
+
+	details := map[string]interface{}{
+		"schedule":                      cj.Spec.Schedule,
+		"suspend":                       cj.Spec.Suspend != nil && *cj.Spec.Suspend,
+		"last_schedule_time":            cj.Status.LastScheduleTime,
+		"active_jobs":                   len(cj.Status.Active),
+		"concurrency_policy":            string(cj.Spec.ConcurrencyPolicy),
+		"successful_jobs_history_limit": cj.Spec.SuccessfulJobsHistoryLimit,
+		"failed_jobs_history_limit":     cj.Spec.FailedJobsHistoryLimit,
+		"starting_deadline_seconds":     cj.Spec.StartingDeadlineSeconds,
+		"containers":                    containers,
+		"labels":                        cj.Labels,
+		"annotations":                   cj.Annotations,
+	}
+
+	// Add job template spec limits
+	if cj.Spec.JobTemplate.Spec.Completions != nil {
+		details["completions"] = *cj.Spec.JobTemplate.Spec.Completions
+	}
+	if cj.Spec.JobTemplate.Spec.Parallelism != nil {
+		details["parallelism"] = *cj.Spec.JobTemplate.Spec.Parallelism
+	}
+	if cj.Spec.JobTemplate.Spec.BackoffLimit != nil {
+		details["backoff_limit"] = *cj.Spec.JobTemplate.Spec.BackoffLimit
+	}
+
 	return map[string]interface{}{
 		"name":          cj.Name,
 		"namespace":     cj.Namespace,
 		"resource_type": "CronJob",
 		"status":        status,
 		"health_score":  health,
-		"details": map[string]interface{}{
-			"schedule":           cj.Spec.Schedule,
-			"suspend":            cj.Spec.Suspend != nil && *cj.Spec.Suspend,
-			"last_schedule_time": cj.Status.LastScheduleTime,
-			"active_jobs":        len(cj.Status.Active),
-			"concurrency_policy": string(cj.Spec.ConcurrencyPolicy),
-		},
+		"details":       details,
 		"relationships": buildCronJobRelationships(cj, application, k8sClient, ctx),
 	}
 }
