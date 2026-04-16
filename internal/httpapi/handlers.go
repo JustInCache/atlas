@@ -978,6 +978,31 @@ func getDeployments(application *app.App) http.HandlerFunc {
 				desired = *dep.Spec.Replicas
 			}
 
+			// Get last restart time by fetching pods for this deployment
+			lastRestartTime := ""
+			lastRestartTimestamp := int64(0)
+			if dep.Spec.Selector != nil && len(dep.Spec.Selector.MatchLabels) > 0 {
+				// Convert matchLabels to label selector
+				labelSelector := metav1.FormatLabelSelector(dep.Spec.Selector)
+				pods, err := k8sClient.Clientset.CoreV1().Pods(dep.Namespace).List(r.Context(), metav1.ListOptions{
+					LabelSelector: labelSelector,
+				})
+				if err == nil {
+					for _, pod := range pods.Items {
+						for _, cs := range pod.Status.ContainerStatuses {
+							// Check last termination state for restart time
+							if cs.LastTerminationState.Terminated != nil && cs.LastTerminationState.Terminated.FinishedAt.Time.Unix() > 0 {
+								finishedAt := cs.LastTerminationState.Terminated.FinishedAt.Time.Unix()
+								if finishedAt > lastRestartTimestamp {
+									lastRestartTimestamp = finishedAt
+									lastRestartTime = cs.LastTerminationState.Terminated.FinishedAt.Format("2006-01-02 15:04:05")
+								}
+							}
+						}
+					}
+				}
+			}
+
 			result = append(result, map[string]interface{}{
 				"name":               dep.Name,
 				"namespace":          dep.Namespace,
@@ -990,6 +1015,7 @@ func getDeployments(application *app.App) http.HandlerFunc {
 				"pod_labels":         dep.Spec.Template.Labels,
 				"health_score":       calculateDeploymentHealth(&dep),
 				"status_emoji":       getDeploymentStatusEmoji(&dep),
+				"last_restart_time":  lastRestartTime,
 			})
 		}
 

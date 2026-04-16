@@ -3086,6 +3086,9 @@ function renderDeploymentsTable(deployments, container, loadTime = '') {
                     <th class="sortable" onclick="sortTable('deployments', '.deployment-table', 4, 'string')">
                         Status<span class="sort-icon"></span>
                     </th>
+                    <th class="sortable" onclick="sortTable('deployments', '.deployment-table', 5, 'date')">
+                        Last Restarted<span class="sort-icon"></span>
+                    </th>
                     <th>View Pods</th>
                     <th>Exposed By (Services)</th>
                 </tr>
@@ -3176,6 +3179,31 @@ function renderDeploymentsTable(deployments, container, loadTime = '') {
             }
         }
         
+        // Format last restart time
+        let lastRestartHtml = '<span class="text-muted">Never</span>';
+        if (dep.last_restart_time) {
+            const restartDate = new Date(dep.last_restart_time);
+            const now = new Date();
+            const diffMs = now - restartDate;
+            const diffMins = Math.floor(diffMs / 60000);
+            const diffHours = Math.floor(diffMs / 3600000);
+            const diffDays = Math.floor(diffMs / 86400000);
+            
+            let timeAgo = '';
+            if (diffMins < 1) {
+                timeAgo = 'Just now';
+            } else if (diffMins < 60) {
+                timeAgo = `${diffMins}m ago`;
+            } else if (diffHours < 24) {
+                timeAgo = `${diffHours}h ago`;
+            } else if (diffDays < 7) {
+                timeAgo = `${diffDays}d ago`;
+            } else {
+                timeAgo = dep.last_restart_time.split(' ')[0]; // Show date only if > 7 days
+            }
+            lastRestartHtml = `<span class="text-info" title="${dep.last_restart_time}">${timeAgo}</span>`;
+        }
+        
         // Main row - clickable to open detail panel
         html += `
             <tr class="clickable-row" onclick="openDetailPanel('deploymentsDetails', 'Deployment', '${dep.namespace}', '${dep.name}')">
@@ -3184,6 +3212,7 @@ function renderDeploymentsTable(deployments, container, loadTime = '') {
                 <td><span class="badge-info">${dep.updated_replicas || 0}</span></td>
                 <td><span class="badge-info">${dep.available_replicas || 0}</span></td>
                 <td><span class="badge-${statusBadge}">${status}</span></td>
+                <td>${lastRestartHtml}</td>
                 <td>${viewPodsHtml}</td>
                 <td>${exposedByHtml}</td>
             </tr>
