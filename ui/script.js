@@ -5318,8 +5318,8 @@ function renderJobsUnderCronJob(jobs) {
         <table class="resource-table" style="margin: 0; font-size: 0.85em;">
             <thead>
                 <tr>
-                    <th>Status</th>
                     <th>Job Name</th>
+                    <th>Status</th>
                     <th>Completions</th>
                     <th>Succeeded</th>
                     <th>Failed</th>
@@ -5355,8 +5355,8 @@ function renderJobsUnderCronJob(jobs) {
         
         html += `
             <tr>
-                <td><span class="${statusClass}">${job.status || '-'}</span></td>
                 <td><code>${job.name}</code></td>
+                <td><span class="${statusClass}">${job.status || '-'}</span></td>
                 <td>${job.completions ?? '-'}</td>
                 <td>${job.succeeded ?? '-'}</td>
                 <td>${job.failed ?? '-'}</td>
