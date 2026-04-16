@@ -1003,17 +1003,13 @@ function populateClusterSelector(clusters, selectedClusterID) {
     clusters.forEach(cluster => {
         const option = document.createElement('option');
         option.value = cluster.id;
-        option.textContent = `${cluster.name} (${cluster.region || cluster.id})`;
+        
+        // Only show checkmark for selected cluster
+        const prefix = cluster.id === selectedClusterID ? '✓ ' : '';
+        option.textContent = `${prefix}${cluster.name} (${cluster.region || cluster.id})`;
         
         if (cluster.id === selectedClusterID) {
             option.selected = true;
-        }
-        
-        // Add status indicator
-        if (cluster.status) {
-            const statusIcon = cluster.status === 'healthy' ? '✓' : 
-                              cluster.status === 'unhealthy' ? '✗' : '○';
-            option.textContent = `${statusIcon} ${option.textContent}`;
         }
         
         clusterSelect.appendChild(option);
