@@ -94,7 +94,7 @@ func calculateNextRunIn(schedule string, lastScheduleTime *time.Time) string {
 
 	// Parse schedule to estimate interval
 	var interval time.Duration
-	var fixedMinute, fixedHour int = -1, -1
+	fixedMinute, fixedHour := -1, -1
 
 	// Parse the schedule parts
 	parts := strings.Fields(schedule)

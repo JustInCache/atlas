@@ -49,7 +49,7 @@ func getAllResources(application *app.App) http.HandlerFunc {
 			if quickCheck != nil && quickCheck.ResourceVersion == cachedVersion {
 				// Nothing changed, return cached data
 				if cached, ok := application.Cache.Get(cacheKey); ok {
-					json.NewEncoder(w).Encode(cached)
+					_ = json.NewEncoder(w).Encode(cached)
 					return
 				}
 			}
@@ -57,7 +57,7 @@ func getAllResources(application *app.App) http.HandlerFunc {
 
 		// Check full cache (in case ResourceVersion check was skipped)
 		if cached, ok := application.Cache.Get(cacheKey); ok {
-			json.NewEncoder(w).Encode(cached)
+			_ = json.NewEncoder(w).Encode(cached)
 			return
 		}
 
@@ -1104,9 +1104,10 @@ func getHealth(application *app.App) http.HandlerFunc {
 
 					roles := []string{}
 					for label := range node.Labels {
-						if label == "node-role.kubernetes.io/control-plane" || label == "node-role.kubernetes.io/master" {
+						switch label {
+						case "node-role.kubernetes.io/control-plane", "node-role.kubernetes.io/master":
 							roles = append(roles, "control-plane")
-						} else if label == "node-role.kubernetes.io/worker" {
+						case "node-role.kubernetes.io/worker":
 							roles = append(roles, "worker")
 						}
 					}

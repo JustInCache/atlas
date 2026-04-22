@@ -111,9 +111,9 @@ func getExport(application *app.App) http.HandlerFunc {
 			}
 		} else {
 			w.Header().Set("Content-Type", "application/json")
-			enc := json.NewEncoder(w)
-			enc.SetIndent("", "  ")
-			enc.Encode(data)
+		enc := json.NewEncoder(w)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(data)
 		}
 	}
 }
