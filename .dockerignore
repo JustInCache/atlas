@@ -38,3 +38,8 @@ Thumbs.db
 # Local config
 .env
 .env.local
+config.yaml
+config copy.yaml
+
+# Kubeconfigs — injected at runtime via entrypoint.sh, never baked into image
+kubeconfigs/

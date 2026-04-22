@@ -39,12 +39,11 @@ COPY --from=builder /app/ui /app/ui
 COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
-# Create non-root user before copying kubeconfigs so we can set ownership
+# Create non-root user; kubeconfigs directory is populated at runtime
+# by entrypoint.sh from environment variables (e.g. Secrets Manager on ECS)
 RUN adduser -D -u 1000 appuser \
   && mkdir -p /home/appuser/.kube /app/kubeconfigs \
   && chown appuser:appuser /app/kubeconfigs
-
-COPY --chown=appuser:appuser kubeconfigs/ /app/kubeconfigs/
 USER appuser
 
 # Expose port
