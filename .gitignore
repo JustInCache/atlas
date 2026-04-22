@@ -24,8 +24,25 @@ profile.cov
 go.work
 go.work.sum
 
-# env file
+# Compiled binaries
+bin/
+
+# Environment and secrets
 .env
+config.yaml
+config copy.yaml
+
+# Kubeconfig files (contain cluster credentials)
+kubeconfigs/
+
+# AWS task definition (contains account IDs and ARNs)
+task-definition.json
+
+# Documentation files
+*.md
+
+# macOS metadata
+.DS_Store
 
 # Editor/IDE
 # .idea/
