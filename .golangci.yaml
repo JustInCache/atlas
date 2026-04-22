@@ -7,19 +7,19 @@ linters:
     - govet
     - ineffassign
     - unused
+
   settings:
     staticcheck:
       checks:
         - "all"
-        # SA1019: corev1.Endpoints is deprecated in k8s v1.33+ in favour of
-        # discoveryv1.EndpointSlice. Migration is tracked separately.
+        # SA1019: corev1.Endpoints deprecated in k8s v1.33+ (use EndpointSlice).
+        # Migration tracked separately; suppress to avoid blocking every PR.
         - "-SA1019"
 
-issues:
   exclusions:
     rules:
-      # WIP handler files with functions implemented but not yet wired to routes.
-      # Suppress `unused` until routes are registered.
+      # WIP handler files — functions implemented but not yet wired to routes.
+      # Suppress `unused` until route registration is complete.
       - path: "internal/httpapi/handlers_export\\.go"
         linters: [unused]
       - path: "internal/httpapi/handlers_network\\.go"
