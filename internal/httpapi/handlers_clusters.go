@@ -93,7 +93,7 @@ func getClusterInfo(application *app.App) http.HandlerFunc {
 			"context", currentContext,
 			"namespace_count", len(nsList))
 
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"cluster_name": clusterName,
 			"context_name": currentContext,
 			"namespaces":   nsList,
@@ -136,7 +136,7 @@ func getCurrentClusterHandler(app *app.App) http.HandlerFunc {
 				"mode":       "single-cluster",
 			}
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(response)
+			_ = json.NewEncoder(w).Encode(response)
 			return
 		}
 
@@ -155,7 +155,7 @@ func getCurrentClusterHandler(app *app.App) http.HandlerFunc {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response)
 	}
 }
 
@@ -213,7 +213,7 @@ func switchClusterHandler(app *app.App) http.HandlerFunc {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response)
 	}
 }
 
@@ -244,7 +244,7 @@ func getClusterHealthHandler(app *app.App) http.HandlerFunc {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(results)
+		_ = json.NewEncoder(w).Encode(results)
 	}
 }
 
@@ -272,7 +272,7 @@ func getClusterInfoHandler(app *app.App) http.HandlerFunc {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(info)
+		_ = json.NewEncoder(w).Encode(info)
 	}
 }
 
@@ -283,7 +283,7 @@ func getCacheStatsHandler(app *app.App) http.HandlerFunc {
 		stats := app.Cache.Stats()
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(stats)
+		_ = json.NewEncoder(w).Encode(stats)
 	}
 }
 

@@ -71,7 +71,7 @@ func TestTCP(hostname string, port int) map[string]interface{} {
         }
     }
 
-    conn.Close()
+    _ = conn.Close()
     return map[string]interface{}{
         "success":      true,
         "message":      fmt.Sprintf("TCP connection successful to %s:%d", hostname, port),
@@ -119,7 +119,7 @@ func TestHTTP(hostname string, useTLS bool) map[string]interface{} {
             "status_emoji": "✗",
         }
     }
-    defer resp.Body.Close()
+    defer func() { _ = resp.Body.Close() }()
 
     // Consider 2xx, 3xx, 401, 403 as "reachable" (server responded)
     success := resp.StatusCode < 500

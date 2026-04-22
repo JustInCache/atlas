@@ -16,4 +16,3 @@ jobs:
   release:
     name: Release
     uses: ./.github/workflows/reusable-release.yaml
-    secrets: inherit

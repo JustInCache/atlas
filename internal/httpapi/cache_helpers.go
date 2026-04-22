@@ -58,7 +58,7 @@ func serveFromCacheIfUnchanged(
 	// If version unchanged, serve from cache
 	if currentVersion != "" && currentVersion == cachedVersion {
 		if cached, ok := application.Cache.Get(cacheKey); ok {
-			json.NewEncoder(w).Encode(cached)
+			_ = json.NewEncoder(w).Encode(cached)
 			return true
 		}
 	}

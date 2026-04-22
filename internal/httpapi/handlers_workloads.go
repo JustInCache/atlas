@@ -30,7 +30,7 @@ func getStatefulSets(application *app.App) http.HandlerFunc {
 		clusterID := getClusterID(application, r)
 		cacheKey := fmt.Sprintf("%s:statefulsets:%s", clusterID, namespace)
 		if cached, ok := application.Cache.Get(cacheKey); ok {
-			json.NewEncoder(w).Encode(cached)
+			_ = json.NewEncoder(w).Encode(cached)
 			return
 		}
 
@@ -67,7 +67,7 @@ func getStatefulSets(application *app.App) http.HandlerFunc {
 		response := map[string]interface{}{"statefulsets": result}
 		application.Cache.Set(cacheKey, response, 30*time.Second)
 
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response)
 	}
 }
 
@@ -88,7 +88,7 @@ func getDaemonSets(application *app.App) http.HandlerFunc {
 		clusterID := getClusterID(application, r)
 		cacheKey := fmt.Sprintf("%s:daemonsets:%s", clusterID, namespace)
 		if cached, ok := application.Cache.Get(cacheKey); ok {
-			json.NewEncoder(w).Encode(cached)
+			_ = json.NewEncoder(w).Encode(cached)
 			return
 		}
 
@@ -121,7 +121,7 @@ func getDaemonSets(application *app.App) http.HandlerFunc {
 		response := map[string]interface{}{"daemonsets": result}
 		application.Cache.Set(cacheKey, response, 30*time.Second)
 
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response)
 	}
 }
 
@@ -142,7 +142,7 @@ func getJobs(application *app.App) http.HandlerFunc {
 		clusterID := getClusterID(application, r)
 		cacheKey := fmt.Sprintf("%s:jobs:%s", clusterID, namespace)
 		if cached, ok := application.Cache.Get(cacheKey); ok {
-			json.NewEncoder(w).Encode(cached)
+			_ = json.NewEncoder(w).Encode(cached)
 			return
 		}
 
@@ -205,7 +205,7 @@ func getJobs(application *app.App) http.HandlerFunc {
 		response := map[string]interface{}{"jobs": result}
 		application.Cache.Set(cacheKey, response, 60*time.Second)
 
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response)
 	}
 }
 
@@ -226,7 +226,7 @@ func getEndpoints(application *app.App) http.HandlerFunc {
 		clusterID := getClusterID(application, r)
 		cacheKey := fmt.Sprintf("%s:endpoints:%s", clusterID, namespace)
 		if cached, ok := application.Cache.Get(cacheKey); ok {
-			json.NewEncoder(w).Encode(cached)
+			_ = json.NewEncoder(w).Encode(cached)
 			return
 		}
 
@@ -291,7 +291,7 @@ func getEndpoints(application *app.App) http.HandlerFunc {
 		response := map[string]interface{}{"endpoints": result}
 		application.Cache.Set(cacheKey, response, 20*time.Second)
 
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response)
 	}
 }
 
@@ -354,7 +354,7 @@ func getStorageClasses(application *app.App) http.HandlerFunc {
 			})
 		}
 
-		json.NewEncoder(w).Encode(map[string]interface{}{"storageclasses": result})
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"storageclasses": result})
 	}
 }
 
@@ -448,7 +448,7 @@ func getHPAs(application *app.App) http.HandlerFunc {
 			})
 		}
 
-		json.NewEncoder(w).Encode(map[string]interface{}{"hpas": result})
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"hpas": result})
 	}
 }
 
@@ -500,6 +500,6 @@ func getPDBs(application *app.App) http.HandlerFunc {
 			})
 		}
 
-		json.NewEncoder(w).Encode(map[string]interface{}{"pdbs": result})
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"pdbs": result})
 	}
 }

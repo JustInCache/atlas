@@ -33,7 +33,7 @@ func getResourceRelationships(application *app.App) http.HandlerFunc {
 		clusterID := getClusterID(application, r)
 		cacheKey := fmt.Sprintf("%s:relationships:%s", clusterID, namespace)
 		if cached, ok := application.Cache.Get(cacheKey); ok {
-			json.NewEncoder(w).Encode(cached)
+			_ = json.NewEncoder(w).Encode(cached)
 			return
 		}
 
@@ -52,7 +52,7 @@ func getResourceRelationships(application *app.App) http.HandlerFunc {
 		// Cache for 30 seconds
 		application.Cache.Set(cacheKey, relationships, 30*time.Second)
 
-		json.NewEncoder(w).Encode(relationships)
+		_ = json.NewEncoder(w).Encode(relationships)
 	}
 }
 
