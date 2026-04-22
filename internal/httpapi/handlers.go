@@ -783,7 +783,7 @@ func getServices(application *app.App) http.HandlerFunc {
 			application.Cache.SetWithVersion(cacheKey, response, servicesList.ResourceVersion, 30*time.Second)
 		}
 
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response)
 	}
 }
 
@@ -817,7 +817,7 @@ func getPods(application *app.App) http.HandlerFunc {
 		// Only use cache for non-paginated requests to avoid complexity
 		if limit == 0 && continueToken == "" {
 			if cached, ok := application.Cache.Get(cacheKey); ok {
-				json.NewEncoder(w).Encode(cached)
+				_ = json.NewEncoder(w).Encode(cached)
 				return
 			}
 		}
@@ -885,7 +885,7 @@ func getPods(application *app.App) http.HandlerFunc {
 			application.Cache.Set(cacheKey, response, 15*time.Second)
 		}
 
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response)
 	}
 }
 
@@ -919,7 +919,7 @@ func getDeployments(application *app.App) http.HandlerFunc {
 		if limit == 0 && continueToken == "" {
 			cacheKey = fmt.Sprintf("%s:deployments:%s", clusterID, namespace)
 			if cached, ok := application.Cache.Get(cacheKey); ok {
-				json.NewEncoder(w).Encode(cached)
+				_ = json.NewEncoder(w).Encode(cached)
 				return
 			}
 		}
@@ -1034,7 +1034,7 @@ func getDeployments(application *app.App) http.HandlerFunc {
 			application.Cache.Set(cacheKey, response, 30*time.Second)
 		}
 
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response)
 	}
 }
 
@@ -1055,7 +1055,7 @@ func getHealth(application *app.App) http.HandlerFunc {
 		clusterID := getClusterID(application, r)
 		cacheKey := fmt.Sprintf("%s:health:%s", clusterID, namespace)
 		if cached, ok := application.Cache.Get(cacheKey); ok {
-			json.NewEncoder(w).Encode(cached)
+			_ = json.NewEncoder(w).Encode(cached)
 			return
 		}
 
@@ -1444,7 +1444,7 @@ func getHealth(application *app.App) http.HandlerFunc {
 		// Cache for 30 seconds
 		application.Cache.Set(cacheKey, response, 30*time.Second)
 
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response)
 	}
 }
 
@@ -1463,7 +1463,7 @@ func getReleases(application *app.App) http.HandlerFunc {
 		clusterID := getClusterID(application, r)
 		cacheKey := fmt.Sprintf("%s:releases:%s", clusterID, namespace)
 		if cached, ok := application.Cache.Get(cacheKey); ok {
-			json.NewEncoder(w).Encode(cached)
+			_ = json.NewEncoder(w).Encode(cached)
 			return
 		}
 
@@ -1476,7 +1476,7 @@ func getReleases(application *app.App) http.HandlerFunc {
 		// Cache the result
 		application.Cache.Set(cacheKey, releases, 30*time.Second)
 
-		json.NewEncoder(w).Encode(releases)
+		_ = json.NewEncoder(w).Encode(releases)
 	}
 }
 
@@ -1497,7 +1497,7 @@ func getDeploymentHistory(application *app.App) http.HandlerFunc {
 		cacheKey := fmt.Sprintf("%s:deployment-history:%s:%s", clusterID, namespace, deploymentName)
 
 		if cached, ok := application.Cache.Get(cacheKey); ok {
-			json.NewEncoder(w).Encode(cached)
+			_ = json.NewEncoder(w).Encode(cached)
 			return
 		}
 
@@ -1510,7 +1510,7 @@ func getDeploymentHistory(application *app.App) http.HandlerFunc {
 		// Cache the result
 		application.Cache.Set(cacheKey, history, 30*time.Second)
 
-		json.NewEncoder(w).Encode(history)
+		_ = json.NewEncoder(w).Encode(history)
 	}
 }
 
@@ -1541,7 +1541,7 @@ func getConfigMaps(application *app.App) http.HandlerFunc {
 
 		// Fallback to regular cache check
 		if cached, ok := application.Cache.Get(cacheKey); ok {
-			json.NewEncoder(w).Encode(cached)
+			_ = json.NewEncoder(w).Encode(cached)
 			return
 		}
 
@@ -1587,7 +1587,7 @@ func getConfigMaps(application *app.App) http.HandlerFunc {
 		response := map[string]interface{}{"configmaps": result}
 		application.Cache.SetWithVersion(cacheKey, response, currentVersion, 30*time.Second)
 
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response)
 	}
 }
 
@@ -1614,7 +1614,7 @@ func getSecrets(application *app.App) http.HandlerFunc {
 
 		// Fallback to regular cache check
 		if cached, ok := application.Cache.Get(cacheKey); ok {
-			json.NewEncoder(w).Encode(cached)
+			_ = json.NewEncoder(w).Encode(cached)
 			return
 		}
 
@@ -1656,7 +1656,7 @@ func getSecrets(application *app.App) http.HandlerFunc {
 		response := map[string]interface{}{"secrets": result}
 		application.Cache.SetWithVersion(cacheKey, response, currentVersion, 30*time.Second)
 
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response)
 	}
 }
 
@@ -1682,14 +1682,14 @@ func getPVPVC(application *app.App) http.HandlerFunc {
 			quickCheck, _ := k8sClient.Clientset.CoreV1().PersistentVolumeClaims(namespace).List(ctx, metav1.ListOptions{Limit: 1})
 			if quickCheck != nil && quickCheck.ResourceVersion == cachedVersion {
 				if cached, ok := application.Cache.Get(cacheKey); ok {
-					json.NewEncoder(w).Encode(cached)
+					_ = json.NewEncoder(w).Encode(cached)
 					return
 				}
 			}
 		}
 
 		if cached, ok := application.Cache.Get(cacheKey); ok {
-			json.NewEncoder(w).Encode(cached)
+			_ = json.NewEncoder(w).Encode(cached)
 			return
 		}
 
@@ -1966,7 +1966,7 @@ func getPVPVC(application *app.App) http.HandlerFunc {
 		// Cache for 30 seconds with version
 		application.Cache.SetWithVersion(cacheKey, response, currentVersion, 30*time.Second)
 
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response)
 	}
 }
 
@@ -1984,7 +1984,7 @@ func getCRDs(application *app.App) http.HandlerFunc {
 		clusterID := getClusterID(application, r)
 		cacheKey := fmt.Sprintf("%s:crds:cluster", clusterID)
 		if cached, ok := application.Cache.Get(cacheKey); ok {
-			json.NewEncoder(w).Encode(cached)
+			_ = json.NewEncoder(w).Encode(cached)
 			return
 		}
 
@@ -2114,7 +2114,7 @@ func getCRDs(application *app.App) http.HandlerFunc {
 		// Cache for 5 minutes (CRDs don't change often)
 		application.Cache.Set(cacheKey, result, 5*time.Minute)
 
-		json.NewEncoder(w).Encode(result)
+		_ = json.NewEncoder(w).Encode(result)
 	}
 }
 
@@ -2243,7 +2243,7 @@ func getCronJobsAndJobs(application *app.App) http.HandlerFunc {
 			}
 		}
 
-		json.NewEncoder(w).Encode(cronJobs)
+		_ = json.NewEncoder(w).Encode(cronJobs)
 	}
 }
 

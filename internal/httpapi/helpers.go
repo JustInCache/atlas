@@ -417,7 +417,7 @@ func buildPodDetails(pod *corev1.Pod, application *app.App, ctx context.Context)
 		}
 		if cs.State.Running != nil {
 			status["state"] = "Running"
-			if cs.State.Running.StartedAt.Time.Unix() > 0 {
+			if cs.State.Running.StartedAt.Unix() > 0 {
 				status["started_at"] = cs.State.Running.StartedAt.Format("2006-01-02 15:04:05")
 			}
 		} else if cs.State.Waiting != nil {

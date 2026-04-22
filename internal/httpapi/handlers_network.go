@@ -41,6 +41,6 @@ func testNetwork(application *app.App) http.HandlerFunc {
 			return
 		}
 
-		json.NewEncoder(w).Encode(result)
+		_ = json.NewEncoder(w).Encode(result)
 	}
 }

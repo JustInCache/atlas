@@ -16,7 +16,7 @@ func clearCache(application *app.App) http.HandlerFunc {
 
 		application.Logger.Info("Cache cleared", "entries_removed", count)
 
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"message":         "Cache cleared successfully",
 			"entries_removed": count,
 		})
@@ -30,6 +30,6 @@ func getCacheStats(application *app.App) http.HandlerFunc {
 
 		stats := application.Cache.Stats()
 
-		json.NewEncoder(w).Encode(stats)
+		_ = json.NewEncoder(w).Encode(stats)
 	}
 }
