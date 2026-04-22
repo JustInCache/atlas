@@ -7,28 +7,26 @@ linters:
     - govet
     - ineffassign
     - unused
-
-linters-settings:
-  staticcheck:
-    checks:
-      - "all"
-      # SA1019: corev1.Endpoints is deprecated in k8s v1.33+ in favour of
-      # discoveryv1.EndpointSlice. Migration is tracked separately and
-      # should not block CI on every PR.
-      - "-SA1019"
+  settings:
+    staticcheck:
+      checks:
+        - "all"
+        # SA1019: corev1.Endpoints is deprecated in k8s v1.33+ in favour of
+        # discoveryv1.EndpointSlice. Migration is tracked separately.
+        - "-SA1019"
 
 issues:
-  exclude-rules:
-    # handlers_export.go, handlers_network.go, handlers_cache.go contain
-    # WIP handler functions implemented but not yet wired to routes.
-    # Tracked separately; suppress until routes are registered.
-    - path: "internal/httpapi/handlers_export\\.go"
-      linters: [unused]
-    - path: "internal/httpapi/handlers_network\\.go"
-      linters: [unused]
-    - path: "internal/httpapi/handlers_cache\\.go"
-      linters: [unused]
-    - path: "internal/httpapi/handlers_clusters\\.go"
-      linters: [unused]
-    - path: "internal/k8s/list\\.go"
-      linters: [unused]
+  exclusions:
+    rules:
+      # WIP handler files with functions implemented but not yet wired to routes.
+      # Suppress `unused` until routes are registered.
+      - path: "internal/httpapi/handlers_export\\.go"
+        linters: [unused]
+      - path: "internal/httpapi/handlers_network\\.go"
+        linters: [unused]
+      - path: "internal/httpapi/handlers_cache\\.go"
+        linters: [unused]
+      - path: "internal/httpapi/handlers_clusters\\.go"
+        linters: [unused]
+      - path: "internal/k8s/list\\.go"
+        linters: [unused]
