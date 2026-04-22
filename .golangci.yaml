@@ -12,9 +12,13 @@ linters:
     staticcheck:
       checks:
         - "all"
-        # SA1019: corev1.Endpoints deprecated in k8s v1.33+ (use EndpointSlice).
-        # Migration tracked separately; suppress to avoid blocking every PR.
+        # SA1019: corev1.Endpoints deprecated in k8s v1.33+; migration tracked separately.
         - "-SA1019"
+        # ST1000/ST1020/ST1021: package and exported-symbol doc comment style.
+        # Enforcing strict doc format is a separate documentation task.
+        - "-ST1000"
+        - "-ST1020"
+        - "-ST1021"
 
   exclusions:
     rules:

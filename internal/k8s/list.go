@@ -873,7 +873,7 @@ func GetDeploymentHistory(ctx context.Context, cs *kubernetes.Clientset, namespa
 
 		revisions = append(revisions, DeploymentRevision{
 			Revision:  revision,
-			CreatedAt: rs.CreationTimestamp.Time.Format("2006-01-02T15:04:05Z"),
+			CreatedAt: rs.CreationTimestamp.Format("2006-01-02T15:04:05Z"),
 			Images:    images,
 			Replicas:  replicas,
 			Reason:    reason,

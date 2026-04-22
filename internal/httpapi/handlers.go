@@ -567,7 +567,7 @@ func getIngresses(application *app.App) http.HandlerFunc {
 		clusterID := getClusterID(application, r)
 		cacheKey := fmt.Sprintf("%s:ingresses:%s", clusterID, namespace)
 		if cached, ok := application.Cache.Get(cacheKey); ok {
-			json.NewEncoder(w).Encode(cached)
+			_ = json.NewEncoder(w).Encode(cached)
 			return
 		}
 
@@ -664,7 +664,7 @@ func getIngresses(application *app.App) http.HandlerFunc {
 		// Cache for 30 seconds
 		application.Cache.Set(cacheKey, result, 30*time.Second)
 
-		json.NewEncoder(w).Encode(result)
+		_ = json.NewEncoder(w).Encode(result)
 	}
 }
 
@@ -705,7 +705,7 @@ func getServices(application *app.App) http.HandlerFunc {
 
 			// Fallback to regular cache check
 			if cached, ok := application.Cache.Get(cacheKey); ok {
-				json.NewEncoder(w).Encode(cached)
+				_ = json.NewEncoder(w).Encode(cached)
 				return
 			}
 		}
@@ -991,8 +991,8 @@ func getDeployments(application *app.App) http.HandlerFunc {
 					for _, pod := range pods.Items {
 						for _, cs := range pod.Status.ContainerStatuses {
 							// Check last termination state for restart time
-							if cs.LastTerminationState.Terminated != nil && cs.LastTerminationState.Terminated.FinishedAt.Time.Unix() > 0 {
-								finishedAt := cs.LastTerminationState.Terminated.FinishedAt.Time.Unix()
+						if cs.LastTerminationState.Terminated != nil && cs.LastTerminationState.Terminated.FinishedAt.Unix() > 0 {
+							finishedAt := cs.LastTerminationState.Terminated.FinishedAt.Unix()
 								if finishedAt > lastRestartTimestamp {
 									lastRestartTimestamp = finishedAt
 									lastRestartTime = cs.LastTerminationState.Terminated.FinishedAt.Format("2006-01-02 15:04:05")
