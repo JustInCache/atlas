@@ -406,7 +406,7 @@ func getAllResources(application *app.App) http.HandlerFunc {
 		}
 		application.Cache.SetWithVersion(cacheKey, response, currentVersion, 30*time.Second)
 
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response)
 	}
 }
 
@@ -427,7 +427,7 @@ func getResourceDetails(application *app.App) http.HandlerFunc {
 		clusterID := getClusterID(application, r)
 		cacheKey := fmt.Sprintf("%s:resource-details:%s:%s:%s", clusterID, resourceType, namespace, name)
 		if cached, ok := application.Cache.Get(cacheKey); ok {
-			json.NewEncoder(w).Encode(cached)
+			_ = json.NewEncoder(w).Encode(cached)
 			return
 		}
 
@@ -548,7 +548,7 @@ func getResourceDetails(application *app.App) http.HandlerFunc {
 		// Cache the result (15 second TTL)
 		application.Cache.Set(cacheKey, details, 15*time.Second)
 
-		json.NewEncoder(w).Encode(details)
+		_ = json.NewEncoder(w).Encode(details)
 	}
 }
 

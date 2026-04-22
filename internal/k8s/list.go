@@ -595,7 +595,7 @@ func GetHealthDashboard(ctx context.Context, cs *kubernetes.Clientset, namespace
 				Reason:   event.Reason,
 				Message:  event.Message,
 				Resource: event.InvolvedObject.Kind + "/" + event.InvolvedObject.Name,
-				Time:     event.LastTimestamp.Time.Format("2006-01-02 15:04:05"),
+				Time:     event.LastTimestamp.Format("2006-01-02 15:04:05"),
 				Count:    event.Count,
 			})
 		}
@@ -651,7 +651,7 @@ func GetReleases(ctx context.Context, cs *kubernetes.Clientset, namespace string
 			DeploymentName: dep.Name,
 			Namespace:      dep.Namespace,
 			Replicas:       dep.Status.Replicas,
-			CreatedAt:      dep.CreationTimestamp.Time.Format("2006-01-02T15:04:05Z"),
+			CreatedAt:      dep.CreationTimestamp.Format("2006-01-02T15:04:05Z"),
 		}
 
 		// Get last deployed time - only when image tags changed (actual code deployment)
@@ -744,7 +744,7 @@ func GetReleases(ctx context.Context, cs *kubernetes.Clientset, namespace string
 		}
 
 		if lastDeployedTime != nil {
-			release.LastDeployed = lastDeployedTime.Time.Format("2006-01-02T15:04:05Z")
+			release.LastDeployed = lastDeployedTime.Format("2006-01-02T15:04:05Z")
 		} else {
 			release.LastDeployed = release.CreatedAt
 		}
