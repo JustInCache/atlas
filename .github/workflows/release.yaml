@@ -1,0 +1,19 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+# Grant the minimum permissions needed by the reusable release workflow
+permissions:
+  contents: write    # create GitHub Release and upload binary archives
+  packages: write    # push Docker images to GHCR
+  id-token: write    # OIDC token for build provenance attestations
+  attestations: write
+
+jobs:
+  release:
+    name: Release
+    uses: ./.github/workflows/reusable-release.yaml
+    secrets: inherit
