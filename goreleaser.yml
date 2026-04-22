@@ -31,8 +31,8 @@ archives:
 
 dockers:
   - image_templates:
-      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:{{ .Version }}-amd64"
-      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:latest-amd64"
+      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY_LC }}:{{ .Version }}-amd64"
+      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY_LC }}:latest-amd64"
     use: buildx
     goos: linux
     goarch: amd64
@@ -42,12 +42,12 @@ dockers:
       - "--label=org.opencontainers.image.description=Lightweight read-only Kubernetes monitoring dashboard"
       - "--label=org.opencontainers.image.version={{ .Version }}"
       - "--label=org.opencontainers.image.created={{ .Date }}"
-      - "--label=org.opencontainers.image.source=https://github.com/{{ .Env.GITHUB_REPOSITORY }}"
+      - "--label=org.opencontainers.image.source=https://github.com/{{ .Env.GITHUB_REPOSITORY_LC }}"
       - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
 
   - image_templates:
-      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:{{ .Version }}-arm64"
-      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:latest-arm64"
+      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY_LC }}:{{ .Version }}-arm64"
+      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY_LC }}:latest-arm64"
     use: buildx
     goos: linux
     goarch: arm64
@@ -57,23 +57,23 @@ dockers:
       - "--label=org.opencontainers.image.description=Lightweight read-only Kubernetes monitoring dashboard"
       - "--label=org.opencontainers.image.version={{ .Version }}"
       - "--label=org.opencontainers.image.created={{ .Date }}"
-      - "--label=org.opencontainers.image.source=https://github.com/{{ .Env.GITHUB_REPOSITORY }}"
+      - "--label=org.opencontainers.image.source=https://github.com/{{ .Env.GITHUB_REPOSITORY_LC }}"
       - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
 
 docker_manifests:
-  - name_template: "ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:{{ .Version }}"
+  - name_template: "ghcr.io/{{ .Env.GITHUB_REPOSITORY_LC }}:{{ .Version }}"
     image_templates:
-      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:{{ .Version }}-amd64"
-      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:{{ .Version }}-arm64"
+      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY_LC }}:{{ .Version }}-amd64"
+      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY_LC }}:{{ .Version }}-arm64"
 
-  - name_template: "ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:latest"
+  - name_template: "ghcr.io/{{ .Env.GITHUB_REPOSITORY_LC }}:latest"
     image_templates:
-      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:latest-amd64"
-      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:latest-arm64"
+      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY_LC }}:latest-amd64"
+      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY_LC }}:latest-arm64"
 
 release:
   github:
-    owner: "{{ .Env.GITHUB_REPOSITORY_OWNER }}"
+    owner: "{{ .Env.GITHUB_REPOSITORY_OWNER_LC }}"
     name: atlas
   # Auto-generate changelog from commit messages between tags
   use_existing_draft: false
